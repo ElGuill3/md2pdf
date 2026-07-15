@@ -256,6 +256,7 @@ for profile in general technical report academic; do
     "$CLI" --profile "$profile" "$SOURCE/profile-reference.md" "$profile_pdf"
   pdfinfo "$profile_pdf" > "$profile_info"
   pdftotext "$profile_pdf" "$profile_text"
+  profile_last_page_text=$TMP_ROOT/profile-$profile-last-page.txt
   assert_contains "$profile identity reaches PDF metadata" \
     "profile-$profile" "$profile_info"
   profile_pages=$(awk '/^Pages:/ { print $2 }' "$profile_info")
@@ -264,6 +265,24 @@ for profile in general technical report academic; do
   else
     fail "$profile profile has representative front and body pages"
   fi
+  pdftotext -f "$profile_pages" -l "$profile_pages" \
+    "$profile_pdf" "$profile_last_page_text"
+  assert_contains "$profile cover retains its title" \
+    "Profile Reference" "$profile_text"
+  assert_contains "$profile cover retains its subtitle" \
+    "One source, four document systems" "$profile_text"
+  assert_contains "$profile output retains its author" \
+    "Ada Example" "$profile_text"
+  assert_contains "$profile output retains its date" \
+    "2026-07-14" "$profile_text"
+  assert_contains "$profile running header uses the document title" \
+    "Profile Reference" "$profile_last_page_text"
+  assert_contains "$profile last page retains page numbering" \
+    "$profile_pages" "$profile_last_page_text"
+  for automatic_profile_label in TECHNICAL REPORT ACADEMIC TÉCNICO INFORME ACADÉMICO; do
+    assert_not_contains "$profile omits automatic $automatic_profile_label labels" \
+      "$automatic_profile_label" "$profile_text"
+  done
   profile_bytes=$(wc -c < "$profile_pdf")
   if [ "$profile_bytes" -gt 30000 ]; then
     pass "$profile profile PDF has substantive rendered size"
@@ -284,15 +303,18 @@ for profile in general technical report academic; do
       assert_contains "General keeps balanced cover identity" "Profile Reference" "$profile_text"
       ;;
     technical)
-      assert_contains "Technical has distinct running furniture" "TECHNICAL · Profile Reference" "$profile_text"
+      assert_contains "Technical footer uses author semantics" \
+        "Ada Example" "$profile_last_page_text"
       assert_contains "Technical numbers sections by default" "1. Architecture" "$profile_text"
       ;;
     report)
-      assert_contains "Report has formal running furniture" "REPORT · Profile Reference" "$profile_text"
+      assert_contains "Report footer uses date semantics" \
+        "2026-07-14" "$profile_last_page_text"
       assert_contains "Report numbers sections by default" "1. Architecture" "$profile_text"
       ;;
     academic)
-      assert_contains "Academic has restrained title label" "ACADEMIC" "$profile_text"
+      assert_contains "Academic footer uses author semantics" \
+        "Ada Example" "$profile_last_page_text"
       assert_contains "Academic numbers equations by default" "(1)" "$profile_text"
       ;;
   esac
@@ -646,8 +668,17 @@ run_status "Spanish report conversion succeeds" 0 \
   "$CLI" "$SOURCE/spanish.md" "$OUTPUT/spanish.pdf"
 pdftotext "$OUTPUT/spanish.pdf" "$TMP_ROOT/spanish.txt"
 assert_contains "Spanish TOC label is localized" "Índice" "$TMP_ROOT/spanish.txt"
-assert_contains "Spanish report furniture is localized" "INFORME" "$TMP_ROOT/spanish.txt"
 assert_contains "Spanish alert label is localized" "Nota" "$TMP_ROOT/spanish.txt"
+assert_contains "Spanish output retains its title" \
+  "Informe de Conversión" "$TMP_ROOT/spanish.txt"
+assert_contains "Spanish output retains its author" \
+  "Equipo de Documentación" "$TMP_ROOT/spanish.txt"
+assert_contains "Spanish output retains its date" \
+  "2026-07-14" "$TMP_ROOT/spanish.txt"
+for automatic_profile_label in TECHNICAL REPORT ACADEMIC TÉCNICO INFORME ACADÉMICO; do
+  assert_not_contains "Spanish output omits automatic $automatic_profile_label labels" \
+    "$automatic_profile_label" "$TMP_ROOT/spanish.txt"
+done
 
 for language_tag in ES ES-MX; do
   language_fixture=$SOURCE/spanish-$language_tag.md
@@ -659,8 +690,10 @@ for language_tag in ES ES-MX; do
   pdftotext "$OUTPUT/spanish-$language_tag.pdf" "$TMP_ROOT/spanish-$language_tag.txt"
   assert_contains "$language_tag localizes the TOC" \
     "Índice" "$TMP_ROOT/spanish-$language_tag.txt"
-  assert_contains "$language_tag localizes profile furniture" \
-    "INFORME" "$TMP_ROOT/spanish-$language_tag.txt"
+  for automatic_profile_label in TECHNICAL REPORT ACADEMIC TÉCNICO INFORME ACADÉMICO; do
+    assert_not_contains "$language_tag omits automatic $automatic_profile_label labels" \
+      "$automatic_profile_label" "$TMP_ROOT/spanish-$language_tag.txt"
+  done
   assert_contains "$language_tag localizes alerts" \
     "Nota" "$TMP_ROOT/spanish-$language_tag.txt"
 done

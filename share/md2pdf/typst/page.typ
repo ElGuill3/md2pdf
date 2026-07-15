@@ -3,30 +3,12 @@
   normalized == "es" or normalized.starts-with("es-")
 }
 
-#let profile-label(config, theme) = {
-  let spanish = is-spanish(config.lang)
-  if theme.name == "technical" {
-    if spanish { "TÉCNICO" } else { "TECHNICAL" }
-  } else if theme.name == "report" {
-    if spanish { "INFORME" } else { "REPORT" }
-  } else if theme.name == "academic" {
-    if spanish { "ACADÉMICO" } else { "ACADEMIC" }
-  } else {
-    ""
-  }
-}
-
-#let default-header(config, theme) = {
-  let profile = profile-label(config, theme)
-  if profile == "" { config.title } else { profile + " · " + config.title }
-}
+#let default-header(config) = config.title
 
 #let default-footer(config, theme) = {
   let authors = config.authors.map(author => author.name).join(", ")
   if theme.name == "report" and config.date != "" {
-    profile-label(config, theme) + " · " + config.date
-  } else if theme.name == "technical" {
-    profile-label(config, theme)
+    config.date
   } else {
     authors
   }
@@ -35,7 +17,7 @@
 #let running-header(config, theme) = context {
   let page-number = counter(page).get().first()
   if config.header.enabled and (not config.cover or page-number > 1) {
-    let label = if config.header.text != "" { config.header.text } else { default-header(config, theme) }
+    let label = if config.header.text != "" { config.header.text } else { default-header(config) }
     set text(size: 9pt, fill: theme.colors.gray-mid)
     align(left, text(label))
     v(-0.6em)
@@ -76,9 +58,7 @@
 #let cover-page(config, theme) = {
   if theme.cover-style == "technical" {
     rect(width: 100%, height: 10pt, fill: theme.colors.accent)
-    v(1.4cm)
-    text(size: 9pt, weight: "bold", tracking: 1.5pt, fill: theme.colors.accent-gold, profile-label(config, theme))
-    v(0.5em)
+    v(1.15cm)
     text(size: 25pt, weight: "bold", fill: theme.colors.accent, config.title)
     if config.subtitle != "" {
       v(0.4em)
@@ -96,9 +76,7 @@
     if config.date != "" { text(size: 9pt, fill: theme.colors.gray-mid, config.date) }
   } else if theme.cover-style == "report" {
     rect(width: 34%, height: 8pt, fill: theme.colors.accent-gold)
-    v(2.2cm)
-    text(size: 9pt, weight: "bold", tracking: 2pt, fill: theme.colors.accent-light, profile-label(config, theme))
-    v(0.8em)
+    v(1.7cm)
     text(size: 30pt, weight: "bold", fill: theme.colors.accent, config.title)
     if config.subtitle != "" {
       v(0.5em)
@@ -126,9 +104,7 @@
     if config.date != "" { text(size: 10pt, fill: theme.colors.gray-mid, config.date) }
   } else if theme.cover-style == "academic" {
     align(center)[
-      #v(0.7cm)
-      #text(size: 8pt, tracking: 1.2pt, fill: theme.colors.gray-mid, profile-label(config, theme))
-      #v(0.35em)
+      #v(0.85cm)
       #text(size: 19pt, weight: "bold", fill: theme.colors.accent, config.title)
       #if config.subtitle != "" {
         v(0.35em)
