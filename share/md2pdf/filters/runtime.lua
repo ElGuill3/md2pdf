@@ -524,11 +524,21 @@ local function write_config(config)
   end
   handle:write(contents)
   handle:close()
+
+  local preferred_body = config.profile == "technical" and
+    "Noto Sans" or "Libertinus Serif"
+  local fonts, font_message = io.open(stage_dir .. "/preferred-fonts.txt", "wb")
+  if not fonts then
+    abort("cannot write preferred font policy: " .. tostring(font_message))
+  end
+  fonts:write("body|", preferred_body, "\nmono|IosevkaTerm NF\n")
+  fonts:close()
 end
 
 local staged_images = {}
 local staged_resources = {}
 local remote_images = {}
+local remote_failures = {}
 local citation_keys = {}
 local max_remote_bytes = 5 * 1024 * 1024
 
@@ -761,9 +771,11 @@ local function valid_image_payload(mime, payload)
   return false
 end
 
-local function remote_placeholder(image, target, reason)
-  pandoc.log.warn("remote image unavailable; using linked placeholder (" ..
-    target .. "): " .. reason)
+local function remote_placeholder(image, target, reason, warn)
+  if warn ~= false then
+    pandoc.log.warn("remote image unavailable; using linked placeholder (" ..
+      target .. "): " .. reason)
+  end
   local description = stringify(image.caption)
   if description == "" then description = "remote image" end
   return pandoc.Link(
@@ -773,69 +785,157 @@ local function remote_placeholder(image, target, reason)
   )
 end
 
+local function remote_failure(image, target, reason)
+  local cached = remote_failures[target]
+  if cached then
+    return remote_placeholder(image, target, cached, false)
+  end
+  remote_failures[target] = reason
+  return remote_placeholder(image, target, reason, true)
+end
+
+local function private_ipv4(host)
+  local first, second, third, fourth =
+    host:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+  first, second, third, fourth = tonumber(first), tonumber(second),
+    tonumber(third), tonumber(fourth)
+  if not first or first > 255 or second > 255 or third > 255 or fourth > 255 then
+    return false
+  end
+  return first == 0 or first == 10 or first == 127 or
+    (first == 169 and second == 254) or
+    (first == 172 and second >= 16 and second <= 31) or
+    (first == 192 and second == 168)
+end
+
+local function blocked_remote_host(target)
+  local authority = target:match("^[Hh][Tt][Tt][Pp][Ss]://([^/?#]+)")
+  if not authority then return "invalid HTTPS URL" end
+  authority = authority:gsub("%%(%x%x)", function(hex)
+    return string.char(tonumber(hex, 16))
+  end)
+  authority = authority:match(".*@(.*)$") or authority
+
+  local host = authority:match("^%[([^%]]+)%]") or authority:match("^([^:]+)") or ""
+  host = host:lower():gsub("%.$", "")
+  if host == "localhost" or host:match("%.localhost$") or
+     host == "localhost.localdomain" or host:match("%.localhost%.localdomain$") then
+    return "localhost hostnames are not permitted"
+  end
+  if host == "localhost6" or host == "localhost6.localdomain6" or
+     host == "ip6-localhost" or host == "ip6-loopback" then
+    return "localhost hostnames are not permitted"
+  end
+  if private_ipv4(host) then
+    return "loopback, link-local, and private IP literals are not permitted"
+  end
+
+  local mapped_ipv4 = host:match("^::ffff:(%d+%.%d+%.%d+%.%d+)$")
+  if host == "::" or host == "::1" or host == "0:0:0:0:0:0:0:0" or
+     host == "0:0:0:0:0:0:0:1" or host:match("^f[cd]") or
+     host:match("^fe[89ab]") or (mapped_ipv4 and private_ipv4(mapped_ipv4)) then
+    return "loopback, link-local, and private IP literals are not permitted"
+  end
+  return nil
+end
+
+local function download_reached_limit(path)
+  local handle = io.open(path, "rb")
+  if not handle then return false end
+  local payload = handle:read(max_remote_bytes) or ""
+  handle:close()
+  return #payload >= max_remote_bytes
+end
+
 local function fetch_remote_image(image, target)
   local existing = remote_images[target]
   if existing then
     image.src = existing
     return image
   end
+  if remote_failures[target] then
+    return remote_placeholder(image, target, remote_failures[target], false)
+  end
+
+  local blocked = blocked_remote_host(target)
+  if blocked then return remote_failure(image, target, blocked) end
 
   local download = stage_dir .. "/assets/remote-" ..
     pandoc.sha1(target):sub(1, 20) .. ".download"
+  local curl_arguments = {
+    "--location",
+    "--max-redirs", "5",
+    "--fail",
+    "--silent",
+    "--show-error",
+    "--proto", "=https",
+    "--proto-redir", "=https",
+    "--connect-timeout", "5",
+    "--max-time", "20",
+    "--max-filesize", tostring(max_remote_bytes),
+    "--user-agent", "md2pdf/0.1.0",
+    "--output", download,
+    "--write-out", "%{content_type}",
+    "--",
+    target,
+  }
+  local shell_arguments = {
+    "-c",
+    [[
+limit=$1
+shift
+if ulimit -f "$limit" 2>/dev/null; then
+  exec curl "$@"
+fi
+exec curl "$@"
+]],
+    "md2pdf-remote-fetch",
+    tostring(max_remote_bytes / 512),
+  }
+  for _, argument in ipairs(curl_arguments) do
+    shell_arguments[#shell_arguments + 1] = argument
+  end
   local ok, mime = pcall(
     pandoc.pipe,
-    "curl",
-    {
-      "--location",
-      "--fail",
-      "--silent",
-      "--show-error",
-      "--proto", "=https",
-      "--proto-redir", "=https",
-      "--connect-timeout", "5",
-      "--max-time", "20",
-      "--max-filesize", tostring(max_remote_bytes),
-      "--user-agent", "md2pdf/0.1",
-      "--output", download,
-      "--write-out", "%{content_type}",
-      "--",
-      target,
-    },
+    "sh",
+    shell_arguments,
     ""
   )
   if not ok then
+    local reason = download_reached_limit(download) and
+      "payload exceeds 5 MiB" or "HTTPS fetch failed"
     os.remove(download)
-    return remote_placeholder(image, target, "HTTPS fetch failed")
+    return remote_failure(image, target, reason)
   end
 
   mime = trim(mime):lower():match("^[^;%s]+") or ""
   local extension = remote_mimes[mime]
   if not extension then
     os.remove(download)
-    return remote_placeholder(image, target,
+    return remote_failure(image, target,
       "unsupported response MIME type '" .. (mime ~= "" and mime or "unknown") .. "'")
   end
 
   local input, message = io.open(download, "rb")
   if not input then
-    return remote_placeholder(image, target,
+    return remote_failure(image, target,
       "fetched payload is unreadable (" .. tostring(message) .. ")")
   end
   local payload = input:read(max_remote_bytes + 1) or ""
   input:close()
   if #payload > max_remote_bytes then
     os.remove(download)
-    return remote_placeholder(image, target, "payload exceeds 5 MiB")
+    return remote_failure(image, target, "payload exceeds 5 MiB")
   end
   if not valid_image_payload(mime, payload) then
     os.remove(download)
-    return remote_placeholder(image, target, "response is not a valid " .. mime .. " image")
+    return remote_failure(image, target, "response is not a valid " .. mime .. " image")
   end
 
   local relative = "assets/remote-" .. pandoc.sha1(target):sub(1, 20) .. extension
   if not os.rename(download, stage_dir .. "/" .. relative) then
     os.remove(download)
-    return remote_placeholder(image, target, "cannot stage fetched payload")
+    return remote_failure(image, target, "cannot stage fetched payload")
   end
   remote_images[target] = relative
   image.src = relative
@@ -846,13 +946,13 @@ local function copy_image(image)
   local target = image.src
   local scheme = target:match("^([%a][%w%+%.%-]*):")
   if target:match("^//") then
-    return remote_placeholder(image, target, "scheme-relative URLs are not permitted")
+    return remote_failure(image, target, "scheme-relative URLs are not permitted")
   end
   if scheme then
     if scheme:lower() == "https" then
       return fetch_remote_image(image, target)
     end
-    return remote_placeholder(image, target,
+    return remote_failure(image, target,
       "only HTTPS remote images are permitted (received " .. scheme:lower() .. ")")
   end
 

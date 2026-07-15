@@ -15,11 +15,14 @@
 #let md2pdf-document(config: (:), body) = {
   let theme = profile-themes.at(config.profile)
   let author-names = config.authors.map(author => author.name)
+  let author-emails = config.authors
+    .filter(author => author.email != "")
+    .map(author => "author-email:" + author.email)
 
   set document(
     title: config.title,
     author: author-names,
-    keywords: ("md2pdf", "profile-" + config.profile),
+    keywords: ("md2pdf", "profile-" + config.profile) + author-emails,
   )
 
   page-layout(

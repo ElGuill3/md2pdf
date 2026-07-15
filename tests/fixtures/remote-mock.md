@@ -9,4 +9,6 @@ md2pdf:
 
 ![Wrong MIME](https://assets.test/wrong.svg)
 
+![Repeated wrong MIME](https://assets.test/wrong.svg)
+
 ![Oversized image](https://assets.test/large.svg)

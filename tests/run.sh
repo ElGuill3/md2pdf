@@ -126,6 +126,13 @@ if [ "${MD2PDF_TEST_NON_GIT_CHILD:-0}" = 1 ]; then
   else
     pass "non-Git copy does not require a worktree"
   fi
+  run_status "non-Git source copy performs a real asset conversion" 0 \
+    "$CLI" "$SOURCE/local-svg.md" "$OUTPUT/non-git-local-svg.pdf"
+  if [ -s "$OUTPUT/non-git-local-svg.pdf" ]; then
+    pass "non-Git source copy resolves bundled runtime and local assets"
+  else
+    fail "non-Git source copy resolves bundled runtime and local assets"
+  fi
   total=$((passed + failed))
   printf '%s tests passed; %s tests failed; %s total\n' "$passed" "$failed" "$total"
   [ "$failed" -eq 0 ]
@@ -261,8 +268,12 @@ for profile in general technical report academic; do
   fi
   run_status "$profile cover page rasterizes" 0 \
     pdftoppm -f 1 -singlefile -png -r 72 "$profile_pdf" "$TMP_ROOT/profile-$profile-cover"
+  case $profile in
+    academic) profile_body_page=1 ;;
+    *) profile_body_page=3 ;;
+  esac
   run_status "$profile body page rasterizes" 0 \
-    pdftoppm -f "$profile_pages" -singlefile -png -r 72 \
+    pdftoppm -f "$profile_body_page" -singlefile -png -r 72 \
       "$profile_pdf" "$TMP_ROOT/profile-$profile-body"
   case $profile in
     general)
@@ -283,13 +294,25 @@ for profile in general technical report academic; do
   esac
 done
 
-for profile in technical report academic; do
-  if cmp "$TMP_ROOT/profile-general-cover.png" \
-      "$TMP_ROOT/profile-$profile-cover.png" >/dev/null 2>&1; then
-    fail "$profile cover is visually distinct from General"
-  else
-    pass "$profile cover is visually distinct from General"
-  fi
+for profile_pair in \
+  'general technical' \
+  'general report' \
+  'general academic' \
+  'technical report' \
+  'technical academic' \
+  'report academic'
+do
+  set -- $profile_pair
+  left_profile=$1
+  right_profile=$2
+  for page_kind in cover body; do
+    if cmp "$TMP_ROOT/profile-$left_profile-$page_kind.png" \
+        "$TMP_ROOT/profile-$right_profile-$page_kind.png" >/dev/null 2>&1; then
+      fail "$left_profile and $right_profile $page_kind pages are visually distinct"
+    else
+      pass "$left_profile and $right_profile $page_kind pages are visually distinct"
+    fi
+  done
 done
 
 for profile in general technical report academic; do
@@ -342,6 +365,9 @@ assert_contains "structured affiliation list survives" \
   "Analytical Society; Computing Group" "$TMP_ROOT/complex.txt"
 assert_contains "author list survives" "Grace Hopper" "$TMP_ROOT/complex.txt"
 assert_not_contains "top-level false TOC is honored" "Contents" "$TMP_ROOT/complex.txt"
+pdfinfo "$OUTPUT/complex.pdf" > "$TMP_ROOT/complex.info"
+assert_contains "author email is retained in intentional PDF metadata" \
+  "author-email:ada@example.test" "$TMP_ROOT/complex.info"
 
 run_status "quoted and backslashed metadata succeeds" 0 \
   "$CLI" "$SOURCE/metadata-special.md" "$OUTPUT/metadata-special.pdf"
@@ -502,13 +528,27 @@ else
   printf '  expected mode 600, received %s\n' "$preserved_mode" >&2
   fail "atomic replacement preserves target mode"
 fi
-run_status "HTTPS fetch failure degrades to a placeholder" 0 \
-  "$CLI" "$SOURCE/remote-asset.md" "$OUTPUT/remote.pdf"
+remote_bin=$TMP_ROOT/remote-bin
+mkdir -p "$remote_bin"
+cp "$SOURCE/mock-curl" "$remote_bin/curl"
+chmod +x "$remote_bin/curl"
+
+remote_failure_log=$TMP_ROOT/remote-failure.log
+run_status "HTTPS fetch failure degrades to a placeholder without live network access" 0 \
+  env PATH="$remote_bin:$PATH" MD2PDF_CURL_LOG="$remote_failure_log" \
+    "$CLI" "$SOURCE/remote-asset.md" "$OUTPUT/remote.pdf"
 assert_contains "HTTPS fetch warning is clear" \
   "remote image unavailable; using linked placeholder" "$last_stderr"
 pdftotext "$OUTPUT/remote.pdf" "$TMP_ROOT/remote.txt"
 assert_contains "HTTPS failure placeholder is visible" \
   "Remote image unavailable: Remote resource" "$TMP_ROOT/remote.txt"
+remote_failure_calls=$(wc -l < "$remote_failure_log")
+if [ "$remote_failure_calls" -eq 1 ]; then
+  pass "repeated HTTPS failure does not repeat curl"
+else
+  printf '  expected 1 curl call, received %s\n' "$remote_failure_calls" >&2
+  fail "repeated HTTPS failure does not repeat curl"
+fi
 
 run_status "HTTP image is blocked without aborting conversion" 0 \
   "$CLI" "$SOURCE/remote-http.md" "$OUTPUT/remote-http.pdf"
@@ -526,12 +566,25 @@ pdftotext "$OUTPUT/remote-file-uri.pdf" "$TMP_ROOT/remote-file-uri.txt"
 assert_contains "file URI placeholder is visible" \
   "Remote image unavailable: Local URI" "$TMP_ROOT/remote-file-uri.txt"
 
-remote_bin=$TMP_ROOT/remote-bin
-mkdir -p "$remote_bin"
-cp "$SOURCE/mock-curl" "$remote_bin/curl"
-chmod +x "$remote_bin/curl"
+private_log=$TMP_ROOT/remote-private.log
+run_status "private and localhost remote literals degrade without a network attempt" 0 \
+  env PATH="$remote_bin:$PATH" MD2PDF_CURL_LOG="$private_log" \
+    "$CLI" "$SOURCE/remote-private.md" "$OUTPUT/remote-private.pdf"
+private_stderr=$last_stderr
+assert_contains "localhost hostname warning is clear" \
+  "localhost hostnames are not permitted" "$private_stderr"
+assert_contains "private IP warning is clear" \
+  "loopback, link-local, and private IP literals are not permitted" "$private_stderr"
+if [ ! -s "$private_log" ]; then
+  pass "blocked remote hosts never invoke curl"
+else
+  fail "blocked remote hosts never invoke curl"
+fi
+
+remote_mock_log=$TMP_ROOT/remote-mock.log
 run_status "bounded HTTPS fetch stages valid images and replaces invalid responses" 0 \
-  env PATH="$remote_bin:$PATH" "$CLI" "$SOURCE/remote-mock.md" "$OUTPUT/remote-mock.pdf"
+  env PATH="$remote_bin:$PATH" MD2PDF_CURL_LOG="$remote_mock_log" \
+    "$CLI" "$SOURCE/remote-mock.md" "$OUTPUT/remote-mock.pdf"
 remote_mock_stderr=$last_stderr
 assert_contains "remote MIME rejection warning is clear" \
   "unsupported response MIME type 'text/html'" "$remote_mock_stderr"
@@ -542,8 +595,17 @@ assert_contains "successfully fetched image keeps its caption" \
   "Fetched image" "$TMP_ROOT/remote-mock.txt"
 assert_contains "wrong MIME response becomes a visible placeholder" \
   "Remote image unavailable: Wrong MIME" "$TMP_ROOT/remote-mock.txt"
+assert_contains "cached wrong MIME response keeps each placeholder visible" \
+  "Remote image unavailable: Repeated wrong MIME" "$TMP_ROOT/remote-mock.txt"
 assert_contains "oversized response becomes a visible placeholder" \
   "Remote image unavailable: Oversized image" "$TMP_ROOT/remote-mock.txt"
+remote_mock_calls=$(wc -l < "$remote_mock_log")
+if [ "$remote_mock_calls" -eq 3 ]; then
+  pass "repeated failed remote URL is fetched only once"
+else
+  printf '  expected 3 curl calls, received %s\n' "$remote_mock_calls" >&2
+  fail "repeated failed remote URL is fetched only once"
+fi
 
 run_status "raw Typst remains inert" 0 \
   "$CLI" "$SOURCE/raw-typst.md" "$OUTPUT/raw-typst.pdf"
@@ -582,6 +644,22 @@ pdftotext "$OUTPUT/spanish.pdf" "$TMP_ROOT/spanish.txt"
 assert_contains "Spanish TOC label is localized" "Índice" "$TMP_ROOT/spanish.txt"
 assert_contains "Spanish report furniture is localized" "INFORME" "$TMP_ROOT/spanish.txt"
 assert_contains "Spanish alert label is localized" "Nota" "$TMP_ROOT/spanish.txt"
+
+for language_tag in ES ES-MX; do
+  language_fixture=$SOURCE/spanish-$language_tag.md
+  awk -v tag="$language_tag" \
+    '$1 == "lang:" { print "lang: " tag; next } { print }' \
+    "$SOURCE/spanish.md" > "$language_fixture"
+  run_status "$language_tag selects Spanish labels case-insensitively" 0 \
+    "$CLI" "$language_fixture" "$OUTPUT/spanish-$language_tag.pdf"
+  pdftotext "$OUTPUT/spanish-$language_tag.pdf" "$TMP_ROOT/spanish-$language_tag.txt"
+  assert_contains "$language_tag localizes the TOC" \
+    "Índice" "$TMP_ROOT/spanish-$language_tag.txt"
+  assert_contains "$language_tag localizes profile furniture" \
+    "INFORME" "$TMP_ROOT/spanish-$language_tag.txt"
+  assert_contains "$language_tag localizes alerts" \
+    "Nota" "$TMP_ROOT/spanish-$language_tag.txt"
+done
 
 run_status "multilingual glyph fallback conversion succeeds" 0 \
   "$CLI" "$SOURCE/multilingual.md" "$OUTPUT/multilingual.pdf"
@@ -649,8 +727,189 @@ assert_contains "post-table content is restored" "PORTRAIT AFTER" "$TMP_ROOT/wid
 run_status "wide table page rasterizes" 0 \
   pdftoppm -f 2 -singlefile -png -r 96 "$OUTPUT/wide-table.pdf" "$TMP_ROOT/wide-table"
 
+typst_proxy_bin=$TMP_ROOT/typst-proxy-bin
+mkdir -p "$typst_proxy_bin"
+cp "$SOURCE/typst-proxy" "$typst_proxy_bin/typst"
+chmod +x "$typst_proxy_bin/typst"
+real_typst=$(command -v typst)
+
+run_status "successful Typst warnings remain visible" 0 \
+  env PATH="$typst_proxy_bin:$PATH" MD2PDF_REAL_TYPST="$real_typst" \
+    MD2PDF_TYPST_MODE=warning \
+    "$CLI" "$SOURCE/simple.md" "$OUTPUT/typst-warning.pdf"
+assert_contains "successful Typst diagnostic is preserved" \
+  "warning: representative missing-glyph diagnostic" "$last_stderr"
+
+run_status "missing preferred font uses fallback with a visible warning" 0 \
+  env PATH="$typst_proxy_bin:$PATH" MD2PDF_REAL_TYPST="$real_typst" \
+    MD2PDF_TYPST_MODE=missing-font \
+    "$CLI" "$SOURCE/simple.md" "$OUTPUT/missing-preferred-font.pdf"
+assert_contains "missing preferred font diagnostic names the family" \
+  "preferred body font is unavailable: Libertinus Serif" "$last_stderr"
+
+printf 'existing target\n' > "$OUTPUT/typst-failure.pdf"
+cp "$OUTPUT/typst-failure.pdf" "$TMP_ROOT/typst-failure.expected"
+run_status "Typst failure preserves full diagnostics" 6 \
+  env PATH="$typst_proxy_bin:$PATH" MD2PDF_REAL_TYPST="$real_typst" \
+    MD2PDF_TYPST_MODE=fail \
+    "$CLI" "$SOURCE/simple.md" "$OUTPUT/typst-failure.pdf"
+typst_failure_stderr=$last_stderr
+assert_contains "Typst failure retains primary diagnostic" \
+  "representative Typst compilation failure" "$typst_failure_stderr"
+assert_contains "Typst failure retains diagnostic detail" \
+  "diagnostic detail is preserved" "$typst_failure_stderr"
+if cmp "$OUTPUT/typst-failure.pdf" "$TMP_ROOT/typst-failure.expected" >/dev/null 2>&1; then
+  pass "Typst failure preserves the existing PDF"
+else
+  fail "Typst failure preserves the existing PDF"
+fi
+
+install_home=$TMP_ROOT/install-home
+install_bin=$TMP_ROOT/install-xdg-bin
+install_data=$TMP_ROOT/install-xdg-data
+mkdir -p "$install_home" "$install_bin" "$install_data"
+run_status "default XDG installation dry-run succeeds" 0 \
+  env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
+    "$ROOT/install.sh" --dry-run
+assert_contains "installation dry-run reports version" \
+  "Would install md2pdf 0.1.0" "$last_stdout"
+assert_absent "installation dry-run creates no launcher" "$install_bin/md2pdf"
+assert_absent "installation dry-run creates no runtime" "$install_data/md2pdf"
+
+run_status "default XDG installation succeeds" 0 \
+  env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
+    "$ROOT/install.sh"
+installed_cli=$install_bin/md2pdf
+installed_data=$install_data/md2pdf
+run_status "installed launcher reports version 0.1.0" 0 "$installed_cli" --version
+assert_contains "installed launcher version is stable" "md2pdf 0.1.0" "$last_stdout"
+if [ -x "$installed_cli" ] && [ -x "$installed_data/uninstall.sh" ]; then
+  pass "installation preserves launcher and uninstaller executable modes"
+else
+  fail "installation preserves launcher and uninstaller executable modes"
+fi
+
+install_work=$TMP_ROOT/installed-conversion
+mkdir -p "$install_work/assets"
+cp "$SOURCE/local-svg.md" "$install_work/document.md"
+cp "$SOURCE/assets/mark.svg" "$install_work/assets/mark.svg"
+run_status "installed launcher converts from another working directory" 0 \
+  env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
+    sh -c 'cd "$1" && "$2" document.md result.pdf' sh \
+      "$install_work" "$installed_cli"
+run_status "installed conversion with local asset rasterizes" 0 \
+  pdftoppm -f 1 -singlefile -png -r 72 \
+    "$install_work/result.pdf" "$TMP_ROOT/installed-local-svg"
+
+printf 'bin sentinel\n' > "$install_bin/unrelated-sentinel"
+printf 'data sentinel\n' > "$installed_data/unrelated-sentinel"
+run_status "reinstallation is idempotent" 0 \
+  env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
+    "$ROOT/install.sh"
+if [ -f "$install_bin/unrelated-sentinel" ] && \
+   [ -f "$installed_data/unrelated-sentinel" ]; then
+  pass "reinstallation preserves unrelated sentinel files"
+else
+  fail "reinstallation preserves unrelated sentinel files"
+fi
+
+secure_prefix=$TMP_ROOT/secure-prefix
+run_status "hostile umask installation succeeds" 0 sh -c \
+  'umask 000; exec "$1" --prefix "$2"' sh "$ROOT/install.sh" "$secure_prefix"
+bad_mode=
+for mode_path in "$secure_prefix/bin/md2pdf" $(find "$secure_prefix/share/md2pdf" \( -type d -o -type f \) -print); do
+  expected_mode=644
+  if [ -d "$mode_path" ] || [ "$mode_path" = "$secure_prefix/bin/md2pdf" ] || [ "$mode_path" = "$secure_prefix/share/md2pdf/uninstall.sh" ]; then expected_mode=755; fi
+  [ "$(portable_mode "$mode_path")" = "$expected_mode" ] || bad_mode=$mode_path
+done
+if [ -z "$bad_mode" ]; then pass "hostile umask publishes exact safe modes"; else fail "hostile umask publishes exact safe modes"; fi
+
+outside_runtime=$TMP_ROOT/outside-runtime; outside_sentinel=$outside_runtime/sentinel; mkdir "$outside_runtime"; printf 'outside sentinel\n' > "$outside_sentinel"; sentinel_checksum=$(cksum < "$outside_sentinel")
+runtime_link_prefix=$TMP_ROOT/runtime-link-prefix; mkdir -p "$runtime_link_prefix/share"; ln -s "$outside_runtime" "$runtime_link_prefix/share/md2pdf"
+run_status "installer rejects a symlinked runtime directory" 1 "$ROOT/install.sh" --prefix "$runtime_link_prefix"
+symlink_prefix=$TMP_ROOT/symlink-prefix
+run_status "symlink test installation succeeds" 0 "$ROOT/install.sh" --prefix "$symlink_prefix"
+rm "$symlink_prefix/share/md2pdf/filters/runtime.lua" && ln -s "$outside_sentinel" "$symlink_prefix/share/md2pdf/filters/runtime.lua"
+run_status "installer rejects a symlinked runtime destination" 1 "$ROOT/install.sh" --prefix "$symlink_prefix"
+rm "$symlink_prefix/share/md2pdf/filters/runtime.lua" && cp "$DATA/filters/runtime.lua" "$symlink_prefix/share/md2pdf/filters/runtime.lua"
+rm "$symlink_prefix/bin/md2pdf" && ln -s "$outside_sentinel" "$symlink_prefix/bin/md2pdf"
+run_status "installer rejects a symlinked launcher target" 1 "$ROOT/install.sh" --prefix "$symlink_prefix"
+rm "$symlink_prefix/bin/md2pdf" && cp "$CLI" "$symlink_prefix/bin/md2pdf"
+rm "$symlink_prefix/share/md2pdf/uninstall.sh" && ln -s "$outside_sentinel" "$symlink_prefix/share/md2pdf/uninstall.sh"
+run_status "installer rejects a symlinked uninstaller target" 1 "$ROOT/install.sh" --prefix "$symlink_prefix"
+if [ "$(cksum < "$outside_sentinel")" = "$sentinel_checksum" ]; then pass "rejected installer symlinks preserve outside sentinel content"; else fail "rejected installer symlinks preserve outside sentinel content"; fi
+
+mv_proxy_bin=$TMP_ROOT/install-mv-proxy
+mkdir "$mv_proxy_bin"; real_mv=$(command -v mv)
+cat > "$mv_proxy_bin/mv" <<'EOF'
+#!/bin/sh
+case ${MD2PDF_MV_MODE:-}:$1:$2 in
+  appear:*/.md2pdf-install.*:*/share/md2pdf)
+    mkdir -p "$2" && printf 'concurrent sentinel\n' > "$2/concurrent-sentinel"; exit 1 ;;
+  rollback:*/.md2pdf-install.*:*/share/md2pdf|rollback:*/.md2pdf-backup.*:*/share/md2pdf) exit 1 ;;
+esac
+exec "$MD2PDF_REAL_MV" "$@"
+EOF
+chmod 755 "$mv_proxy_bin/mv"
+concurrent_prefix=$TMP_ROOT/concurrent-prefix
+run_status "concurrent destination appearance fails closed" 1 env PATH="$mv_proxy_bin:$PATH" MD2PDF_REAL_MV="$real_mv" MD2PDF_MV_MODE=appear "$ROOT/install.sh" --prefix "$concurrent_prefix"
+if [ -f "$concurrent_prefix/share/md2pdf/concurrent-sentinel" ]; then pass "concurrent destination is not recursively deleted"; else fail "concurrent destination is not recursively deleted"; fi
+
+rollback_prefix=$TMP_ROOT/rollback-prefix
+run_status "rollback test installation succeeds" 0 "$ROOT/install.sh" --prefix "$rollback_prefix"
+run_status "publication and restoration failure is reported" 1 env PATH="$mv_proxy_bin:$PATH" MD2PDF_REAL_MV="$real_mv" MD2PDF_MV_MODE=rollback "$ROOT/install.sh" --prefix "$rollback_prefix"
+assert_contains "restoration failure identifies the preserved backup" "cannot restore the previous runtime; backup remains at" "$last_stderr"
+set -- "$rollback_prefix/share"/.md2pdf-backup.*/.install-manifest
+if [ ! -e "$rollback_prefix/share/md2pdf" ] && [ -f "$1" ]; then pass "failed rollback leaves the prior installation in a known backup"; else fail "failed rollback leaves the prior installation in a known backup"; fi
+
+run_status "installed uninstaller dry-run succeeds" 0 \
+  env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
+    "$installed_data/uninstall.sh" --dry-run
+if [ -x "$installed_cli" ]; then
+  pass "uninstall dry-run leaves launcher installed"
+else
+  fail "uninstall dry-run leaves launcher installed"
+fi
+run_status "default XDG uninstallation succeeds" 0 \
+  env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
+    "$installed_data/uninstall.sh"
+assert_absent "uninstall removes only the installed launcher" "$installed_cli"
+assert_absent "uninstall removes a known runtime file" "$installed_data/filters/runtime.lua"
+if [ -f "$install_bin/unrelated-sentinel" ] && \
+   [ -f "$installed_data/unrelated-sentinel" ]; then
+  pass "uninstall preserves unrelated sentinel files"
+else
+  fail "uninstall preserves unrelated sentinel files"
+fi
+
+install_prefix=$TMP_ROOT/custom-prefix
+printf 'prefix sentinel\n' > "$TMP_ROOT/prefix-sentinel"
+run_status "custom prefix installation succeeds" 0 \
+  env HOME="$install_home" "$ROOT/install.sh" --prefix "$install_prefix"
+run_status "custom prefix launcher reports version" 0 \
+  "$install_prefix/bin/md2pdf" --version
+assert_contains "custom prefix uses the public version" "md2pdf 0.1.0" "$last_stdout"
+run_status "custom prefix uninstallation succeeds" 0 \
+  env HOME="$install_home" "$install_prefix/share/md2pdf/uninstall.sh" \
+    --prefix "$install_prefix"
+assert_absent "custom prefix launcher is removed" "$install_prefix/bin/md2pdf"
+if [ -f "$TMP_ROOT/prefix-sentinel" ]; then
+  pass "custom prefix uninstall preserves outside sentinel"
+else
+  fail "custom prefix uninstall preserves outside sentinel"
+fi
+
+run_status "installer rejects the filesystem root as a prefix" 1 \
+  "$ROOT/install.sh" --prefix / --dry-run
+run_status "uninstaller rejects an empty prefix" 2 \
+  "$ROOT/uninstall.sh" --prefix=
+
 run_status "launcher passes POSIX shell syntax" 0 sh -n "$CLI"
 run_status "test runner passes POSIX shell syntax" 0 sh -n "$ROOT/tests/run.sh"
+run_status "installer passes POSIX shell syntax" 0 sh -n "$ROOT/install.sh"
+run_status "uninstaller passes POSIX shell syntax" 0 sh -n "$ROOT/uninstall.sh"
+run_status "curl fixture passes POSIX shell syntax" 0 sh -n "$SOURCE/mock-curl"
+run_status "Typst proxy fixture passes POSIX shell syntax" 0 sh -n "$SOURCE/typst-proxy"
 
 non_git_root=$TMP_ROOT/non-git-copy
 mkdir -p "$non_git_root"

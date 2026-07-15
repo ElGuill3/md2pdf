@@ -5,4 +5,6 @@ md2pdf:
   toc: false
 ---
 
-![Remote resource](https://127.0.0.1:1/image.svg)
+![Remote resource](https://assets.test/missing.svg)
+
+![Repeated remote resource](https://assets.test/missing.svg)

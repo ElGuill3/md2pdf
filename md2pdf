@@ -4,6 +4,8 @@ set -u
 
 PROGRAM=md2pdf
 VERSION=0.1.0
+# This signature lets uninstall.sh distinguish the public launcher from other files.
+INSTALL_SIGNATURE='md2pdf-public-launcher-0.1.0'
 stage_dir=
 publish_tmp=
 caller_umask=$(umask)
@@ -368,6 +370,33 @@ if [ -s "$pandoc_error" ]; then
   done < "$pandoc_error"
 fi
 
+typst_fonts=$stage_dir/typst-fonts.txt
+typst_fonts_error=$stage_dir/typst-fonts-error.txt
+if typst fonts > "$typst_fonts" 2> "$typst_fonts_error"; then
+  while IFS='|' read -r font_role font_family; do
+    [ -n "$font_role" ] || continue
+    font_found=false
+    while IFS= read -r available_font || [ -n "$available_font" ]; do
+      if [ "$available_font" = "$font_family" ]; then
+        font_found=true
+        break
+      fi
+    done < "$typst_fonts"
+    if [ "$font_found" = false ]; then
+      printf '%s: warning: preferred %s font is unavailable: %s; using configured fallbacks\n' \
+        "$PROGRAM" "$font_role" "$font_family" >&2
+    fi
+  done < "$stage_dir/preferred-fonts.txt"
+else
+  printf '%s: warning: unable to verify preferred fonts; rendering may vary\n' \
+    "$PROGRAM" >&2
+  if [ -s "$typst_fonts_error" ]; then
+    while IFS= read -r font_line || [ -n "$font_line" ]; do
+      printf '  %s\n' "$font_line" >&2
+    done < "$typst_fonts_error"
+  fi
+fi
+
 typst_error=$stage_dir/typst-error.txt
 if ! (CDPATH= cd "$stage_dir" && \
       typst compile --root "$stage_dir" document.typ output.pdf) \
@@ -375,6 +404,11 @@ if ! (CDPATH= cd "$stage_dir" && \
 then
   show_tool_error "Typst compilation failed" "$typst_error"
   exit 6
+fi
+if [ -s "$typst_error" ]; then
+  while IFS= read -r typst_line || [ -n "$typst_line" ]; do
+    printf '%s\n' "$typst_line" >&2
+  done < "$typst_error"
 fi
 
 publish_tmp=$(mktemp "$output_dir/.md2pdf.XXXXXXXX.pdf") || \

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Pandoc 3.8
+        uses: pandoc/actions/setup@v1
+        with:
+          version: '3.8'
+
+      - name: Install Typst 0.15.0
+        uses: typst-community/setup-typst@v5
+        with:
+          typst-version: 0.15.0
+
+      - name: Install Ubuntu PDF and font dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils fonts-noto-core fonts-noto-cjk fonts-noto-mono
+
+      - name: Install macOS PDF and font dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install poppler
+          brew install --cask font-noto-sans font-noto-serif font-noto-serif-cjk-sc font-noto-naskh-arabic font-noto-serif-hebrew font-noto-sans-mono
+
+      - name: Verify shell syntax and source modes
+        run: |
+          sh -n md2pdf install.sh uninstall.sh tests/run.sh
+          sh -n tests/fixtures/bsd-stat tests/fixtures/mock-curl tests/fixtures/typst-proxy
+          test -x md2pdf
+          test -x install.sh
+          test -x uninstall.sh
+          test -x tests/run.sh
+          test ! -x tests/fixtures/bsd-stat
+          test ! -x tests/fixtures/mock-curl
+          test ! -x tests/fixtures/typst-proxy
+
+      - name: Run real PDF suite
+        run: ./tests/run.sh

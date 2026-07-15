@@ -1,0 +1,6 @@
+.DS_Store
+.codegraph/
+.atl/
+.md2pdf.*
+*.tmp
+tests/.tmp/

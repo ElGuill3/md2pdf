@@ -1,4 +1,7 @@
-#let is-spanish(lang) = lang == "es" or lang.starts-with("es-")
+#let is-spanish(lang) = {
+  let normalized = lower(lang)
+  normalized == "es" or normalized.starts-with("es-")
+}
 
 #let profile-label(config, theme) = {
   let spanish = is-spanish(config.lang)
@@ -193,6 +196,7 @@
 }
 
 #let page-layout(config, theme, body) = {
+  let typst-lang = config.lang.split("-").first()
   let paper-name = (
     a3: "a3",
     a4: "a4",
@@ -200,7 +204,7 @@
     letter: "us-letter",
     legal: "us-legal",
   ).at(config.page.paper)
-  set text(font: theme.fonts.body, size: theme.text-size, lang: config.lang, hyphenate: true)
+  set text(font: theme.fonts.body, size: theme.text-size, lang: typst-lang, hyphenate: true)
   set par(justify: true, leading: theme.paragraph-leading, spacing: theme.paragraph-spacing)
   set smartquote(enabled: true)
   set page(

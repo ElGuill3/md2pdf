@@ -1,0 +1,34 @@
+#!/bin/sh
+
+set -u
+
+real_typst=${MD2PDF_REAL_TYPST:?}
+mode=${MD2PDF_TYPST_MODE:-passthrough}
+
+if [ "${1:-}" = fonts ]; then
+  if [ "$mode" = missing-font ]; then
+    "$real_typst" fonts | while IFS= read -r font || [ -n "$font" ]; do
+      [ "$font" = "Libertinus Serif" ] || printf '%s\n' "$font"
+    done
+    exit
+  fi
+  exec "$real_typst" "$@"
+fi
+
+case $mode in
+  warning)
+    "$real_typst" "$@"
+    status=$?
+    if [ "$status" -eq 0 ]; then
+      printf '%s\n' 'warning: representative missing-glyph diagnostic' >&2
+    fi
+    exit "$status"
+    ;;
+  fail)
+    printf '%s\n' \
+      'error: representative Typst compilation failure' \
+      '  diagnostic detail is preserved' >&2
+    exit 1
+    ;;
+  *) exec "$real_typst" "$@" ;;
+esac

@@ -13,7 +13,8 @@
 }
 
 #let alert-label(lang, kind) = {
-  let spanish = lang == "es" or lang.starts-with("es-")
+  let normalized = lower(lang)
+  let spanish = normalized == "es" or normalized.starts-with("es-")
   let labels = if spanish {
     (
       note: "Nota",

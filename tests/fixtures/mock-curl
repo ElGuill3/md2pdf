@@ -17,6 +17,10 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ -n "${MD2PDF_CURL_LOG:-}" ]; then
+  printf '%s\n' "$url" >> "$MD2PDF_CURL_LOG"
+fi
+
 case $url in
   */success.svg)
     printf '%s\n' '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><rect width="120" height="40" fill="#1a3c6e"/></svg>' > "$output"
