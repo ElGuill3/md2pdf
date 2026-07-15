@@ -114,7 +114,7 @@ portable_mode() {
   stat -f '%Lp' "$1" 2>/dev/null
 }
 
-for dependency in pandoc typst pdfinfo pdftotext pdftoppm pdffonts; do
+for dependency in pandoc typst pdfinfo pdftotext pdftoppm pdffonts pdftohtml; do
   if ! command -v "$dependency" >/dev/null 2>&1; then
     printf 'missing test dependency: %s\n' "$dependency" >&2
     exit 99
@@ -731,6 +731,86 @@ assert_contains "inline code retains surrounding word spacing" \
   "inline code path/to_value-name" "$TMP_ROOT/representative.txt"
 run_status "representative pages rasterize" 0 \
   pdftoppm -f 1 -l 3 -png -r 72 "$OUTPUT/representative.pdf" "$TMP_ROOT/representative"
+
+run_status "dense technical table conversion succeeds" 0 \
+  "$CLI" "$SOURCE/dense-table.md" "$OUTPUT/dense-table.pdf"
+pdftotext -raw "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table.raw.txt"
+tr -d '\n\f' < "$TMP_ROOT/dense-table.raw.txt" > "$TMP_ROOT/dense-table.joined.txt"
+assert_contains "dense table path extraction is exact across wraps" \
+  "artifact/src/platform/renderers/dense_table/technical_profile.v2:layout-check" \
+  "$TMP_ROOT/dense-table.joined.txt"
+assert_contains "dense table wrapped hyphen extraction is exact" \
+  "artifact/releases/dense_table/final-verification.ok" \
+  "$TMP_ROOT/dense-table.joined.txt"
+zero_width_space=$(printf '\342\200\213')
+assert_not_contains "dense table extraction contains no zero-width spaces" \
+  "$zero_width_space" "$TMP_ROOT/dense-table.raw.txt"
+assert_contains "outside-table inline code extraction remains exact" \
+  "OUTSIDE_CODE_SENTINEL/path_value.ext" "$TMP_ROOT/dense-table.raw.txt"
+assert_contains "dense table retains final row" "EV-32 final" "$TMP_ROOT/dense-table.raw.txt"
+assert_contains "dense table retains post-table sentinel" \
+  "POST_TABLE_SENTINEL" "$TMP_ROOT/dense-table.raw.txt"
+dense_pages=$(pdfinfo "$OUTPUT/dense-table.pdf" | awk '/^Pages:/ { print $2 }')
+if [ "$dense_pages" -ge 2 ]; then pass "dense table spans page boundaries"; else fail "dense table spans page boundaries"; fi
+pdftotext -bbox "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table.html"
+if awk '
+  /<page / { page++; previous_bottom = 0; footer_top = 100000; in_table = 0 }
+  /<word / && />Files</ {
+    match($0, /xMin="[0-9.]+"/); files_left[page] = substr($0, RSTART + 6, RLENGTH - 7) + 0
+    in_table = 1
+  }
+  /<word / && />Impact</ {
+    match($0, /xMin="[0-9.]+"/); impact_left[page] = substr($0, RSTART + 6, RLENGTH - 7) + 0
+  }
+  /<word / && />POST_TABLE_SENTINEL</ { in_table = 0 }
+  in_table && /<word / {
+    match($0, />[^<]+</); word = substr($0, RSTART + 1, RLENGTH - 2)
+    if (word ~ /(artifact|[/_:]|[.]typ|[.]lua|[.]pdf|[.]json|[.]md|[.]txt|[.]xml|[.]png|[.]toml|[.]bib|[.]svg|[.]log|[.]ok)/) {
+      path_count++
+      path_page[path_count] = page
+      match($0, /xMin="[0-9.]+"/); path_left[path_count] = substr($0, RSTART + 6, RLENGTH - 7) + 0
+      match($0, /xMax="[0-9.]+"/); path_right[path_count] = substr($0, RSTART + 6, RLENGTH - 7) + 0
+    }
+  }
+  /<word / && />EV-[0-9][0-9]</ {
+    match($0, /yMin="[0-9.]+"/); top = substr($0, RSTART + 6, RLENGTH - 7) + 0
+    match($0, /yMax="[0-9.]+"/); bottom = substr($0, RSTART + 6, RLENGTH - 7) + 0
+    if (previous_page == page && top < previous_bottom) bad = 1
+    previous_page = page; previous_bottom = bottom; row_bottom[page] = bottom
+  }
+  /<word / && />DENSE</ {
+    dense_line = 1
+    match($0, /yMin="[0-9.]+"/); dense_top = substr($0, RSTART + 6, RLENGTH - 7) + 0
+  }
+  dense_line && /<word / && />FOOTER</ { footer_top = dense_top; if (row_bottom[page] >= footer_top) bad = 1; dense_line = 0 }
+  END {
+    for (i = 1; i <= path_count; i++) {
+      current_page = path_page[i]
+      if (path_left[i] < files_left[current_page] - 0.1 || path_right[i] > impact_left[current_page] - 3) bad = 1
+    }
+    exit bad
+  }
+' "$TMP_ROOT/dense-table.html"; then
+  pass "dense table bbox stays within columns and clears rows/footer"
+else
+  fail "dense table bbox stays within columns and clears rows/footer"
+fi
+pdftohtml -xml -hidden -i "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table" >/dev/null 2>&1
+if awk '
+  /<text / && /TABLE_PROSE_MARKER/ { match($0, /font="[0-9]+"/); prose = substr($0, RSTART + 6, RLENGTH - 7) }
+  /<text / && /artifact\/src\/parsers\/markdown/ { match($0, /font="[0-9]+"/); inside = substr($0, RSTART + 6, RLENGTH - 7) }
+  /<text / && /OUTSIDE_CODE_SENTINEL/ { match($0, /font="[0-9]+"/); outside = substr($0, RSTART + 6, RLENGTH - 7) }
+  END { exit !(prose != "" && inside == prose && outside != "" && outside != prose) }
+' "$TMP_ROOT/dense-table.xml"; then
+  pass "table code uses table prose typography while outside code stays distinct"
+else
+  fail "table code uses table prose typography while outside code stays distinct"
+fi
+run_status "dense table full pages rasterize" 0 \
+  pdftoppm -png -r 120 "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table-page"
+run_status "dense table close crop rasterizes" 0 \
+  pdftoppm -f 1 -singlefile -png -r 240 -x 60 -y 250 -W 1850 -H 1450 \
+    "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table-crop"
 
 run_status "long table conversion succeeds" 0 \
   "$CLI" "$SOURCE/long-table.md" "$OUTPUT/long-table.pdf"

@@ -67,6 +67,14 @@
   if uppercase { upper(it.body) } else { it.body }
 }
 
+#let md2pdf-table-code(body) = {
+  show regex("[/_.:-]"): it => {
+    it
+    h(0pt, weak: true)
+  }
+  body
+}
+
 #let apply-theme(config, theme, body) = {
   let accent = theme.colors.accent
   let accent-light = theme.colors.accent-light
@@ -202,7 +210,7 @@
     inset: theme.table-inset,
   )
   show table: set text(size: theme.table-size, hyphenate: true)
-  show table: set par(justify: false, linebreaks: "optimized")
+  show table: set par(justify: false, leading: 0.45em, linebreaks: "optimized")
   show figure.where(kind: table): set block(breakable: true)
   show figure.where(kind: table): set figure.caption(position: top)
   show figure.where(kind: image): set figure.caption(position: bottom)

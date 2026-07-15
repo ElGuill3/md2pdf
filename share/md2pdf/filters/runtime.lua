@@ -1035,10 +1035,22 @@ local function div_alert(div)
   return alert_blocks(kind, div.content)
 end
 
-local function wide_table(config)
+local function table_code(code)
+  return {
+    pandoc.RawInline("typst", "#md2pdf-table-code["),
+    pandoc.Str(code.text),
+    pandoc.RawInline("typst", "]"),
+  }
+end
+
+local function prepare_table(config)
   return function(table_element)
+    local caption = table_element.caption
+    table_element = table_element:walk({ Code = table_code })
+    table_element.caption = caption
+
     if #table_element.colspecs <= 5 or config.page.orientation == "landscape" then
-      return nil
+      return table_element
     end
     return {
       pandoc.RawBlock("typst", "#pagebreak()\n#set page(flipped: true)"),
@@ -1063,6 +1075,6 @@ function Pandoc(document)
     BlockQuote = blockquote_alert,
     Div = div_alert,
   })
-  document = document:walk({ Table = wide_table(config) })
+  document = document:walk({ Table = prepare_table(config) })
   return document
 end
