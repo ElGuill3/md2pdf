@@ -39,11 +39,15 @@ md2pdf --profile technical --output build/notes.pdf notes.md
 |---|---|
 | `-o FILE`, `--output FILE` | Writes the PDF to `FILE`. |
 | `--profile NAME` | Selects `general`, `technical`, `report`, or `academic`. |
+| `-q`, `--quiet` | Suppresses progress and the final success line; warnings and errors remain visible. |
 | `--version` | Prints `md2pdf 0.1.0`. |
 | `-h`, `--help` | Prints usage and exit codes. |
 
 `md2pdf INPUT OUTPUT` remains available as a positional compatibility form. Do
 not combine it with `--output`.
+
+By default, conversion, rendering, and publication progress is written to
+stderr. The final `PDF written to ...` line remains on stdout for compatibility.
 
 ## Add Document Metadata
 

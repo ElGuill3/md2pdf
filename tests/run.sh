@@ -106,6 +106,13 @@ assert_absent() {
   if [ ! -e "$file" ]; then pass "$test_name"; else fail "$test_name"; fi
 }
 
+assert_empty() {
+  test_name=$1
+  file=$2
+  last_stderr=
+  if [ ! -s "$file" ]; then pass "$test_name"; else fail "$test_name"; fi
+}
+
 portable_mode() {
   if mode_result=$(stat -c '%a' "$1" 2>/dev/null); then
     printf '%s\n' "$mode_result"
@@ -145,6 +152,60 @@ fi
 
 run_status "help exits successfully" 0 "$CLI" --help
 assert_contains "help documents exit codes" "Exit codes:" "$last_stdout"
+assert_contains "help documents quiet mode" \
+  "Suppress progress and the final success message." "$last_stdout"
+
+run_status "normal conversion reports progress" 0 \
+  "$CLI" "$SOURCE/simple.md" "$OUTPUT/progress.pdf"
+progress_stdout=$last_stdout
+progress_stderr=$last_stderr
+assert_contains "conversion stage is reported on stderr" \
+  "Converting Markdown..." "$progress_stderr"
+assert_contains "rendering stage is reported on stderr" \
+  "Rendering PDF..." "$progress_stderr"
+assert_contains "publication stage is reported on stderr" \
+  "Publishing PDF..." "$progress_stderr"
+assert_contains "default success remains on stdout" \
+  "PDF written to $OUTPUT/progress.pdf" "$progress_stdout"
+assert_not_contains "progress does not contaminate stdout" \
+  "Converting Markdown..." "$progress_stdout"
+assert_not_contains "success does not move to stderr" \
+  "PDF written to" "$progress_stderr"
+
+run_status "quiet conversion succeeds" 0 \
+  "$CLI" --quiet "$SOURCE/simple.md" "$OUTPUT/quiet.pdf"
+quiet_success_stderr=$last_stderr
+assert_empty "quiet conversion suppresses the success line" "$last_stdout"
+assert_not_contains "quiet conversion suppresses conversion progress" \
+  "Converting Markdown..." "$quiet_success_stderr"
+assert_not_contains "quiet conversion suppresses rendering progress" \
+  "Rendering PDF..." "$quiet_success_stderr"
+assert_not_contains "quiet conversion suppresses publication progress" \
+  "Publishing PDF..." "$quiet_success_stderr"
+
+run_status "quiet conversion preserves warnings" 0 \
+  "$CLI" -q "$SOURCE/remote-http.md" "$OUTPUT/quiet-warning.pdf"
+quiet_warning_stderr=$last_stderr
+assert_contains "quiet mode leaves warnings visible" \
+  "only HTTPS remote images are permitted (received http)" "$quiet_warning_stderr"
+assert_not_contains "quiet warning output excludes progress" \
+  "Converting Markdown..." "$quiet_warning_stderr"
+
+run_status "quiet conversion preserves errors" 4 \
+  "$CLI" -q "$SOURCE/invalid-metadata.md" "$OUTPUT/quiet-error.pdf"
+quiet_error_stderr=$last_stderr
+assert_contains "quiet mode leaves errors visible" \
+  "md2pdf: toc must be a boolean" "$quiet_error_stderr"
+assert_not_contains "quiet error output excludes progress" \
+  "Converting Markdown..." "$quiet_error_stderr"
+
+if [ "${MD2PDF_TEST_PROGRESS_ONLY:-0}" = 1 ]; then
+  total=$((passed + failed))
+  printf '%s tests passed; %s tests failed; %s total\n' "$passed" "$failed" "$total"
+  [ "$failed" -eq 0 ]
+  exit
+fi
+
 run_status "version exits successfully" 0 "$CLI" --version
 assert_contains "version is stable" "md2pdf 0.1.0" "$last_stdout"
 run_status "unknown option is rejected" 2 "$CLI" --unknown

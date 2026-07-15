@@ -19,6 +19,7 @@ Convert Markdown to a styled PDF with Pandoc and Typst.
 Options:
   -o, --output FILE      Write the PDF to FILE.
       --profile NAME     Override the metadata profile.
+  -q, --quiet            Suppress progress and the final success message.
   -h, --help             Show this help and exit.
       --version          Show the version and exit.
 
@@ -52,6 +53,10 @@ fail() {
   shift
   printf '%s: %s\n' "$PROGRAM" "$*" >&2
   exit "$fail_code"
+}
+
+inform() {
+  [ "$quiet" = true ] || printf '%s\n' "$*" >&2
 }
 
 cleanup() {
@@ -144,6 +149,7 @@ input=
 legacy_output=
 option_output=
 cli_profile=
+quiet=false
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -177,6 +183,10 @@ while [ "$#" -gt 0 ]; do
       [ -z "$cli_profile" ] || usage_error "profile was specified more than once"
       cli_profile=${1#*=}
       [ -n "$cli_profile" ] || usage_error "option '--profile' requires a name"
+      shift
+      ;;
+    -q|--quiet)
+      quiet=true
       shift
       ;;
     --)
@@ -335,6 +345,7 @@ done
 
 filter_error=$stage_dir/filter-error.txt
 pandoc_error=$stage_dir/pandoc-error.txt
+inform 'Converting Markdown...'
 if ! MD2PDF_STAGE_DIR=$stage_dir \
      MD2PDF_SOURCE_DIR=$input_dir \
      MD2PDF_CLI_PROFILE=$cli_profile \
@@ -372,6 +383,7 @@ fi
 
 typst_fonts=$stage_dir/typst-fonts.txt
 typst_fonts_error=$stage_dir/typst-fonts-error.txt
+inform 'Rendering PDF...'
 if typst fonts > "$typst_fonts" 2> "$typst_fonts_error"; then
   while IFS='|' read -r font_role font_family; do
     [ -n "$font_role" ] || continue
@@ -411,6 +423,7 @@ if [ -s "$typst_error" ]; then
   done < "$typst_error"
 fi
 
+inform 'Publishing PDF...'
 publish_tmp=$(mktemp "$output_dir/.md2pdf.XXXXXXXX.pdf") || \
   fail 7 "cannot create an atomic publication file in: $output_dir"
 if ! cp "$stage_dir/output.pdf" "$publish_tmp"; then
@@ -428,4 +441,6 @@ if ! mv -f "$publish_tmp" "$output_path"; then
 fi
 publish_tmp=
 
-printf 'PDF written to %s\n' "$output_path"
+if [ "$quiet" = false ]; then
+  printf 'PDF written to %s\n' "$output_path"
+fi
