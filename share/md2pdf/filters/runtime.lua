@@ -1039,6 +1039,7 @@ local MAX_PORTRAIT_TABLE_COLUMNS = 5
 local MIN_PATH_DENSE_TABLE_COLUMNS = 3
 local MIN_PATH_CODE_SPANS = 4
 local MIN_PATH_CODE_CHARACTERS = 160
+local MAX_LANDSCAPE_CODE_LINE_CHARACTERS = 32
 
 local function path_code_metrics(table_element)
   local span_count = 0
@@ -1074,11 +1075,28 @@ end
 local function table_code(landscape)
   return function(code)
     local landscape_value = landscape and "true" or "false"
-    return {
+    local result = {
       pandoc.RawInline("typst", "#md2pdf-table-code(landscape: " .. landscape_value .. ")["),
-      pandoc.Str(code.text),
-      pandoc.RawInline("typst", "]"),
     }
+    local start = 1
+    local line_length = 0
+    while landscape do
+      local separator = code.text:find("[/_.:%-]", start)
+      if not separator then break end
+      local segment = code.text:sub(start, separator)
+      result[#result + 1] = pandoc.Str(segment)
+      line_length = line_length + utf8.len(segment)
+      if line_length >= MAX_LANDSCAPE_CODE_LINE_CHARACTERS then
+        result[#result + 1] = pandoc.RawInline("typst", "#linebreak()")
+        line_length = 0
+      end
+      start = separator + 1
+    end
+    if start <= #code.text then
+      result[#result + 1] = pandoc.Str(code.text:sub(start))
+    end
+    result[#result + 1] = pandoc.RawInline("typst", "]")
+    return result
   end
 end
 

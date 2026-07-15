@@ -774,10 +774,17 @@ else
 fi
 pdftotext -bbox "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table.html"
 if awk '
-  /<page / { page++; previous_bottom = 0; footer_top = 100000; in_table = 0 }
+  /<page / {
+    page++; previous_bottom = 0; in_table = 0
+    match($0, /width="[0-9.]+"/); page_width[page] = substr($0, RSTART + 7, RLENGTH - 8) + 0
+    match($0, /height="[0-9.]+"/); page_height[page] = substr($0, RSTART + 8, RLENGTH - 9) + 0
+  }
+  /<word / && />DENSE</ && page_left[page] == 0 {
+    match($0, /xMin="[0-9.]+"/); page_left[page] = substr($0, RSTART + 6, RLENGTH - 7) + 0
+  }
   /<word / && />Files</ {
     match($0, /xMin="[0-9.]+"/); files_left[page] = substr($0, RSTART + 6, RLENGTH - 7) + 0
-    in_table = 1
+    table_page[page] = 1; table_pages++; in_table = 1
   }
   /<word / && />Impact</ {
     match($0, /xMin="[0-9.]+"/); impact_left[page] = substr($0, RSTART + 6, RLENGTH - 7) + 0
@@ -797,6 +804,8 @@ if awk '
     }
   }
   /<word / && />EV-[0-9][0-9]</ {
+    row_count++
+    match($0, /xMin="[0-9.]+"/); if (row_left[page] == 0) row_left[page] = substr($0, RSTART + 6, RLENGTH - 7) + 0
     match($0, /yMin="[0-9.]+"/); top = substr($0, RSTART + 6, RLENGTH - 7) + 0
     match($0, /yMax="[0-9.]+"/); bottom = substr($0, RSTART + 6, RLENGTH - 7) + 0
     if (previous_page == page && top < previous_bottom) bad = 1
@@ -806,11 +815,22 @@ if awk '
     dense_line = 1
     match($0, /yMin="[0-9.]+"/); dense_top = substr($0, RSTART + 6, RLENGTH - 7) + 0
   }
-  dense_line && /<word / && />FOOTER</ { footer_top = dense_top; if (row_bottom[page] >= footer_top) bad = 1; dense_line = 0 }
+  dense_line && /<word / && />FOOTER</ { footer_top[page] = dense_top; dense_line = 0 }
   END {
+    if (table_pages == 0 || row_count != 32 || path_count < row_count) bad = 1
+    for (current_page in table_page) {
+      inset = row_left[current_page] - page_left[current_page]
+      if (page_width[current_page] <= page_height[current_page] || inset <= 0 ||
+          files_left[current_page] == 0 || impact_left[current_page] == 0 ||
+          row_bottom[current_page] == 0 || footer_top[current_page] == 0 ||
+          row_bottom[current_page] >= footer_top[current_page]) bad = 1
+      files_boundary[current_page] = files_left[current_page] - inset
+      impact_boundary[current_page] = impact_left[current_page] - inset
+    }
     for (i = 1; i <= path_count; i++) {
       current_page = path_page[i]
-      if (path_left[i] < files_left[current_page] - 0.1 || path_right[i] > impact_left[current_page] - 3) bad = 1
+      if (!table_page[current_page] || path_left[i] < files_boundary[current_page] - 0.1 ||
+          path_right[i] > impact_boundary[current_page]) bad = 1
     }
     exit bad
   }
@@ -821,20 +841,31 @@ else
 fi
 pdftohtml -xml -hidden -i "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table" >/dev/null 2>&1
 if awk '
+  /<page / { page++ }
   /<fontspec / {
     match($0, /id="[0-9]+"/); id = substr($0, RSTART + 4, RLENGTH - 5)
-    match($0, /size="[0-9]+"/); size[id] = substr($0, RSTART + 6, RLENGTH - 7)
-    match($0, /family="[^"]+"/); family[id] = substr($0, RSTART + 8, RLENGTH - 9)
-    match($0, /color="#[0-9a-fA-F]+"/); color[id] = substr($0, RSTART + 7, RLENGTH - 8)
+    key = page SUBSEP id
+    match($0, /size="[0-9]+"/); size[key] = substr($0, RSTART + 6, RLENGTH - 7)
+    match($0, /family="[^"]+"/); family[key] = substr($0, RSTART + 8, RLENGTH - 9)
+    match($0, /color="#[0-9a-fA-F]+"/); color[key] = substr($0, RSTART + 7, RLENGTH - 8)
   }
-  /<text / && /TABLE_PROSE_MARKER/ { match($0, /font="[0-9]+"/); prose = substr($0, RSTART + 6, RLENGTH - 7) }
-  /<text / && /artifact\/src\/parsers\/markdown/ { match($0, /font="[0-9]+"/); inside = substr($0, RSTART + 6, RLENGTH - 7) }
-  /<text / && /OUTSIDE_CODE_SENTINEL/ { match($0, /font="[0-9]+"/); outside = substr($0, RSTART + 6, RLENGTH - 7) }
+  /<text / && /TABLE_PROSE_MARKER/ {
+    match($0, /font="[0-9]+"/); key = page SUBSEP substr($0, RSTART + 6, RLENGTH - 7)
+    prose_family = family[key]; prose_color = color[key]
+  }
+  /<text / && /artifact\/src\/parsers\/markdown/ {
+    match($0, /font="[0-9]+"/); key = page SUBSEP substr($0, RSTART + 6, RLENGTH - 7)
+    inside_family = family[key]; inside_size = size[key]; inside_color = color[key]
+  }
+  /<text / && /OUTSIDE_CODE_SENTINEL/ {
+    match($0, /font="[0-9]+"/); key = page SUBSEP substr($0, RSTART + 6, RLENGTH - 7)
+    outside_family = family[key]; outside_size = size[key]; outside_color = color[key]
+  }
   END {
-    exit !(prose != "" && inside != "" && outside != "" &&
-      family[inside] ~ /IosevkaTermNF/ && color[inside] == "#1672a6" &&
-      size[inside] == size[outside] && family[inside] == family[outside] &&
-      color[outside] == "#123d6a" && inside != prose)
+    exit !(prose_family != "" && inside_family != "" && outside_family != "" &&
+      inside_family == outside_family && inside_family != prose_family &&
+      inside_size == outside_size && inside_color == "#1672a6" &&
+      outside_color == "#123d6a" && prose_color == "#000000")
   }
 ' "$TMP_ROOT/dense-table.xml"; then
   pass "table code uses profile mono size and accent-light while outside code stays unchanged"

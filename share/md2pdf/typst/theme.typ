@@ -74,12 +74,6 @@
     fill: theme.colors.accent-light,
     hyphenate: false,
   )
-  if landscape {
-    show regex("[/_.:-]"): it => {
-      it
-      h(0pt, weak: true)
-    }
-  }
   body
 }
 
