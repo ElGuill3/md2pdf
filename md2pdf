@@ -1,0 +1,127 @@
+#!/usr/bin/env zsh
+# md2pdf — Convierte Markdown a PDF estilizado con Typst
+# Uso: md2pdf entrada.md [salida.pdf]
+
+set -euo pipefail
+
+if (( $# < 1 || $# > 2 )); then
+  echo "Uso: md2pdf <archivo.md> [salida.pdf]" >&2
+  exit 1
+fi
+
+TEMPLATE_DIR="${0:A:h}"
+INPUT="$1"
+OUTPUT="${2:-${INPUT%.md}.pdf}"
+TMP_TYP=""
+
+# ── Función de limpieza (se ejecuta siempre, incluso en error) ─────────────
+cleanup() {
+  if [[ -n "$TMP_TYP" ]]; then rm -f -- "$TMP_TYP"; fi
+}
+trap cleanup EXIT
+
+# ── Validaciones ──────────────────────────────────────────────────────────
+if [[ ! -f "$INPUT" ]]; then
+  echo "Error: no se encontró el archivo '$INPUT'" >&2
+  exit 1
+fi
+
+INPUT_PATH="${INPUT:A}"
+OUTPUT_PATH="${OUTPUT:A}"
+if [[ "$INPUT_PATH" == "$OUTPUT_PATH" ]]; then
+  echo "Error: input and output must be different files." >&2
+  exit 1
+fi
+INPUT_DIR="${INPUT_PATH:h}"
+
+if [[ "${INPUT##*.}" != "md" ]]; then
+  echo "Advertencia: el archivo no tiene extensión .md, se continuará de todas formas."
+fi
+
+for cmd in pandoc typst; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "Error: '$cmd' no está instalado o no está en el PATH." >&2
+    exit 1
+  fi
+done
+
+if [[ ! -f "${TEMPLATE_DIR}/template.typ" ]]; then
+  echo "Error: no se encontró la plantilla en '${TEMPLATE_DIR}/template.typ'" >&2
+  exit 1
+fi
+
+if [[ ! -f "${TEMPLATE_DIR}/tables.lua" ]]; then
+  echo "Error: no se encontró el filtro en '${TEMPLATE_DIR}/tables.lua'" >&2
+  exit 1
+fi
+
+# ── Extraer metadatos YAML (frontmatter entre líneas --- ) ─────────────────
+# Función: extrae un campo del frontmatter y escapa comillas dobles para Typst
+extract_meta() {
+  local field="$1"
+  # Busca solo dentro del bloque frontmatter (primeras líneas entre --- y ---)
+  awk "
+    /^---/ { if (NR==1) { in_front=1; next } else { in_front=0 } }
+    in_front && /^${field}:/ {
+      sub(/^${field}:[[:space:]]*/, \"\")
+      gsub(/^\"|\"$/, \"\")
+      print
+      exit
+    }
+  " "$INPUT"
+}
+
+TITLE=$(extract_meta "title")
+AUTHOR=$(extract_meta "author")
+DATE=$(extract_meta "date")
+SUBTITLE=$(extract_meta "subtitle")
+TOC=$(extract_meta "toc")
+NUMBER_SECTIONS=$(extract_meta "number-sections")
+
+# Valores por defecto
+TITLE="${TITLE:-Documento}"
+TOC_VAL="true"
+if [[ "$TOC" == "false" ]]; then TOC_VAL="false"; fi
+NUMBER_SECTIONS_VAL="false"
+if [[ "$NUMBER_SECTIONS" == "true" ]]; then NUMBER_SECTIONS_VAL="true"; fi
+
+# Escapar barras y comillas dobles para que no rompan el Typst generado
+escape_typst() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' }
+
+TITLE_ESC=$(escape_typst "$TITLE")
+AUTHOR_ESC=$(escape_typst "$AUTHOR")
+DATE_ESC=$(escape_typst "$DATE")
+SUBTITLE_ESC=$(escape_typst "$SUBTITLE")
+
+# ── Generar archivo .typ temporal ─────────────────────────────────────────
+TMP_TYP="$(mktemp "${INPUT_DIR}/.md2pdf.XXXXXXXX.typ")"
+cat "${TEMPLATE_DIR}/template.typ" > "$TMP_TYP"
+cat >> "$TMP_TYP" << TYPSTEOF
+
+#show: project.with(
+  title: "${TITLE_ESC}",
+  subtitle: "${SUBTITLE_ESC}",
+  author: "${AUTHOR_ESC}",
+  date: "${DATE_ESC}",
+  toc: ${TOC_VAL},
+  number-sections: ${NUMBER_SECTIONS_VAL},
+)
+
+TYPSTEOF
+
+# ── Convertir Markdown → Typst (omitiendo el frontmatter YAML) ────────────
+pandoc "$INPUT_PATH" \
+  --from "markdown+yaml_metadata_block-raw_attribute" \
+  --to typst \
+  --lua-filter "${TEMPLATE_DIR}/tables.lua" \
+  --wrap=none \
+  --strip-comments \
+  >> "$TMP_TYP"
+
+# ── Crear directorio de salida si no existe ───────────────────────────────
+mkdir -p "$(dirname "$OUTPUT")"
+
+# ── Compilar ──────────────────────────────────────────────────────────────
+typst compile --root "$INPUT_DIR" "$TMP_TYP" "$OUTPUT"
+
+echo "✅ PDF generado: $OUTPUT"
