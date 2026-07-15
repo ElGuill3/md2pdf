@@ -113,9 +113,11 @@ normalize_safe_path() {
   while [ "$candidate" != / ] && [ "${candidate%/}" != "$candidate" ]; do
     candidate=${candidate%/}
   done
+  while [ "${candidate#*//}" != "$candidate" ]; do
+    candidate=${candidate%%//*}/${candidate#*//}
+  done
   [ "$candidate" != / ] || fail "$label must not be the filesystem root"
   case $candidate in
-    *'//'*) fail "$label contains an empty path component: $candidate" ;;
     */./*|*/.) fail "$label contains an unsafe '.' component: $candidate" ;;
     */../*|*/..) fail "$label contains an unsafe '..' component: $candidate" ;;
     *'

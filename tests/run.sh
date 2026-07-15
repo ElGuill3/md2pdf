@@ -8,7 +8,11 @@ ROOT=$(CDPATH= cd -P "$(dirname "$0")/.." && pwd -P)
 CLI=$ROOT/md2pdf
 DATA=$ROOT/share/md2pdf
 FIXTURES=$ROOT/tests/fixtures
-TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/md2pdf-tests.XXXXXXXX") || exit 1
+tmp_parent=${TMPDIR:-/tmp}
+while [ "$tmp_parent" != / ] && [ "${tmp_parent%/}" != "$tmp_parent" ]; do
+  tmp_parent=${tmp_parent%/}
+done
+TMP_ROOT=$(mktemp -d "$tmp_parent/md2pdf-tests.XXXXXXXX") || exit 1
 SOURCE=$TMP_ROOT/source
 OUTPUT=$TMP_ROOT/output
 mkdir -p "$SOURCE" "$OUTPUT"
@@ -768,6 +772,13 @@ install_home=$TMP_ROOT/install-home
 install_bin=$TMP_ROOT/install-xdg-bin
 install_data=$TMP_ROOT/install-xdg-data
 mkdir -p "$install_home" "$install_bin" "$install_data"
+macos_tmpdir=$TMP_ROOT/macos-tmp/
+mkdir -p "$macos_tmpdir"
+run_status "installer accepts paths constructed from macOS-style TMPDIR" 0 \
+  env HOME="$install_home" XDG_BIN_HOME="${macos_tmpdir}/install-bin" \
+    XDG_DATA_HOME="${macos_tmpdir}/install-data" "$ROOT/install.sh" --dry-run
+run_status "installer accepts a constructed double separator" 0 \
+  "$ROOT/install.sh" --prefix "$TMP_ROOT//double-separator-prefix" --dry-run
 run_status "default XDG installation dry-run succeeds" 0 \
   env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
     "$ROOT/install.sh" --dry-run
@@ -883,9 +894,10 @@ else
 fi
 
 install_prefix=$TMP_ROOT/custom-prefix
+install_prefix_input=$TMP_ROOT//custom-prefix
 printf 'prefix sentinel\n' > "$TMP_ROOT/prefix-sentinel"
-run_status "custom prefix installation succeeds" 0 \
-  env HOME="$install_home" "$ROOT/install.sh" --prefix "$install_prefix"
+run_status "custom prefix with repeated separator installs" 0 \
+  env HOME="$install_home" "$ROOT/install.sh" --prefix "$install_prefix_input"
 run_status "custom prefix launcher reports version" 0 \
   "$install_prefix/bin/md2pdf" --version
 assert_contains "custom prefix uses the public version" "md2pdf 0.1.0" "$last_stdout"
@@ -901,6 +913,14 @@ fi
 
 run_status "installer rejects the filesystem root as a prefix" 1 \
   "$ROOT/install.sh" --prefix / --dry-run
+run_status "installer rejects an empty prefix" 2 \
+  "$ROOT/install.sh" --prefix=
+run_status "installer rejects a relative prefix" 1 \
+  "$ROOT/install.sh" --prefix relative --dry-run
+run_status "installer rejects a dot path component" 1 \
+  "$ROOT/install.sh" --prefix "$TMP_ROOT/./dot" --dry-run
+run_status "installer rejects a dot-dot path component" 1 \
+  "$ROOT/install.sh" --prefix "$TMP_ROOT/../dot-dot" --dry-run
 run_status "uninstaller rejects an empty prefix" 2 \
   "$ROOT/uninstall.sh" --prefix=
 
