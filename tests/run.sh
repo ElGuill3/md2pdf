@@ -765,7 +765,11 @@ if awk '
   /<word / && />POST_TABLE_SENTINEL</ { in_table = 0 }
   in_table && /<word / {
     match($0, />[^<]+</); word = substr($0, RSTART + 1, RLENGTH - 2)
-    if (word ~ /(artifact|[/_:]|[.]typ|[.]lua|[.]pdf|[.]json|[.]md|[.]txt|[.]xml|[.]png|[.]toml|[.]bib|[.]svg|[.]log|[.]ok)/) {
+    if (index(word, "artifact") || index(word, "/") || index(word, "_") || index(word, ":") ||
+        index(word, ".typ") || index(word, ".lua") || index(word, ".pdf") || index(word, ".json") ||
+        index(word, ".md") || index(word, ".txt") || index(word, ".xml") || index(word, ".png") ||
+        index(word, ".toml") || index(word, ".bib") || index(word, ".svg") || index(word, ".log") ||
+        index(word, ".ok")) {
       path_count++
       path_page[path_count] = page
       match($0, /xMin="[0-9.]+"/); path_left[path_count] = substr($0, RSTART + 6, RLENGTH - 7) + 0
