@@ -52,6 +52,8 @@ Outside table code stays styled: `OUTSIDE_CODE_SENTINEL/path_value.ext`.
 | EV-29 bounds | `artifact/tests/poppler/bbox/column_boundary_check.xml` | Stays inside columns. |
 | EV-30 leading | `artifact/tests/visual/table_cell_leading.reference.png` | Prevents row overlap. |
 | EV-31 pagination | `artifact/tests/pagination/final_row_visibility.test.lua` | Prevents clipped rows. |
-| EV-32 final | `artifact/releases/dense_table/final-verification.ok` | Completes the matrix. |
+| EV-32 final | `artifact/tests/runtime/test_process_notification_flags_delegation.py` | Completes the matrix without splitting the terminal filename. |
+
+: DENSE_TABLE_CAPTION
 
 POST_TABLE_SENTINEL

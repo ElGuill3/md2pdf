@@ -67,10 +67,18 @@
   if uppercase { upper(it.body) } else { it.body }
 }
 
-#let md2pdf-table-code(body) = {
-  show regex("[/_.:-]"): it => {
-    it
-    h(0pt, weak: true)
+#let table-code(theme, body, landscape: false) = {
+  set text(
+    font: theme.fonts.mono,
+    size: theme.code-size,
+    fill: theme.colors.accent-light,
+    hyphenate: false,
+  )
+  if landscape {
+    show regex("[/_.:-]"): it => {
+      it
+      h(0pt, weak: true)
+    }
   }
   body
 }

@@ -114,7 +114,7 @@ portable_mode() {
   stat -f '%Lp' "$1" 2>/dev/null
 }
 
-for dependency in pandoc typst pdfinfo pdftotext pdftoppm pdffonts pdftohtml; do
+for dependency in pandoc typst pdfinfo pdftotext pdftoppm pdftocairo pdffonts pdftohtml; do
   if ! command -v "$dependency" >/dev/null 2>&1; then
     printf 'missing test dependency: %s\n' "$dependency" >&2
     exit 99
@@ -740,18 +740,38 @@ assert_contains "dense table path extraction is exact across wraps" \
   "artifact/src/platform/renderers/dense_table/technical_profile.v2:layout-check" \
   "$TMP_ROOT/dense-table.joined.txt"
 assert_contains "dense table wrapped hyphen extraction is exact" \
-  "artifact/releases/dense_table/final-verification.ok" \
+  "artifact/tests/runtime/test_process_notification_flags_delegation.py" \
   "$TMP_ROOT/dense-table.joined.txt"
 zero_width_space=$(printf '\342\200\213')
 assert_not_contains "dense table extraction contains no zero-width spaces" \
   "$zero_width_space" "$TMP_ROOT/dense-table.raw.txt"
+soft_hyphen=$(printf '\302\255')
+assert_not_contains "dense table extraction contains no soft hyphens" \
+  "$soft_hyphen" "$TMP_ROOT/dense-table.raw.txt"
 assert_contains "outside-table inline code extraction remains exact" \
   "OUTSIDE_CODE_SENTINEL/path_value.ext" "$TMP_ROOT/dense-table.raw.txt"
 assert_contains "dense table retains final row" "EV-32 final" "$TMP_ROOT/dense-table.raw.txt"
+assert_contains "dense table retains its caption" \
+  "DENSE_TABLE_CAPTION" "$TMP_ROOT/dense-table.raw.txt"
 assert_contains "dense table retains post-table sentinel" \
   "POST_TABLE_SENTINEL" "$TMP_ROOT/dense-table.raw.txt"
 dense_pages=$(pdfinfo "$OUTPUT/dense-table.pdf" | awk '/^Pages:/ { print $2 }')
 if [ "$dense_pages" -ge 2 ]; then pass "dense table spans page boundaries"; else fail "dense table spans page boundaries"; fi
+pdfinfo -f 1 -l "$dense_pages" "$OUTPUT/dense-table.pdf" > "$TMP_ROOT/dense-table.info"
+if awk -v pages="$dense_pages" '
+  $1 == "Page" && $3 == "size:" {
+    seen[$2] = 1
+    portrait[$2] = $4 < $6
+  }
+  END {
+    if (pages < 3 || !portrait[1] || !portrait[pages]) exit 1
+    for (page = 2; page < pages; page++) if (!seen[page] || portrait[page]) exit 1
+  }
+' "$TMP_ROOT/dense-table.info"; then
+  pass "dense table uses portrait-landscape-portrait page sizes"
+else
+  fail "dense table uses portrait-landscape-portrait page sizes"
+fi
 pdftotext -bbox "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table.html"
 if awk '
   /<page / { page++; previous_bottom = 0; footer_top = 100000; in_table = 0 }
@@ -801,20 +821,79 @@ else
 fi
 pdftohtml -xml -hidden -i "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table" >/dev/null 2>&1
 if awk '
+  /<fontspec / {
+    match($0, /id="[0-9]+"/); id = substr($0, RSTART + 4, RLENGTH - 5)
+    match($0, /size="[0-9]+"/); size[id] = substr($0, RSTART + 6, RLENGTH - 7)
+    match($0, /family="[^"]+"/); family[id] = substr($0, RSTART + 8, RLENGTH - 9)
+    match($0, /color="#[0-9a-fA-F]+"/); color[id] = substr($0, RSTART + 7, RLENGTH - 8)
+  }
   /<text / && /TABLE_PROSE_MARKER/ { match($0, /font="[0-9]+"/); prose = substr($0, RSTART + 6, RLENGTH - 7) }
   /<text / && /artifact\/src\/parsers\/markdown/ { match($0, /font="[0-9]+"/); inside = substr($0, RSTART + 6, RLENGTH - 7) }
   /<text / && /OUTSIDE_CODE_SENTINEL/ { match($0, /font="[0-9]+"/); outside = substr($0, RSTART + 6, RLENGTH - 7) }
-  END { exit !(prose != "" && inside == prose && outside != "" && outside != prose) }
+  END {
+    exit !(prose != "" && inside != "" && outside != "" &&
+      family[inside] ~ /IosevkaTermNF/ && color[inside] == "#1672a6" &&
+      size[inside] == size[outside] && family[inside] == family[outside] &&
+      color[outside] == "#123d6a" && inside != prose)
+  }
 ' "$TMP_ROOT/dense-table.xml"; then
-  pass "table code uses table prose typography while outside code stays distinct"
+  pass "table code uses profile mono size and accent-light while outside code stays unchanged"
 else
-  fail "table code uses table prose typography while outside code stays distinct"
+  fail "table code uses profile mono size and accent-light while outside code stays unchanged"
 fi
+pdftocairo -f 1 -l 1 -svg "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-outside.svg"
+pdftocairo -f 2 -l 2 -svg "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-inside.svg"
+assert_contains "outside-table inline code retains its highlight" \
+  "rgb(90.98" "$TMP_ROOT/dense-outside.svg"
+assert_not_contains "table code has no inline-code highlight" \
+  "rgb(90.98" "$TMP_ROOT/dense-inside.svg"
 run_status "dense table full pages rasterize" 0 \
   pdftoppm -png -r 120 "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table-page"
 run_status "dense table close crop rasterizes" 0 \
   pdftoppm -f 1 -singlefile -png -r 240 -x 60 -y 250 -W 1850 -H 1450 \
     "$OUTPUT/dense-table.pdf" "$TMP_ROOT/dense-table-crop"
+
+run_status "selective landscape threshold conversion succeeds" 0 \
+  "$CLI" "$SOURCE/landscape-thresholds.md" "$OUTPUT/landscape-thresholds.pdf"
+pdfinfo -f 1 -l 5 "$OUTPUT/landscape-thresholds.pdf" > "$TMP_ROOT/landscape-thresholds.info"
+if awk '
+  $1 == "Pages:" { pages = $2 }
+  $1 == "Page" && $3 == "size:" { portrait[$2] = $4 < $6 }
+  END { exit !(pages == 5 && portrait[1] && !portrait[2] && portrait[3] && !portrait[4] && portrait[5]) }
+' "$TMP_ROOT/landscape-thresholds.info"; then
+  pass "threshold fixtures produce portrait-landscape-portrait-landscape-portrait pages"
+else
+  fail "threshold fixtures produce portrait-landscape-portrait-landscape-portrait pages"
+fi
+pdftotext -f 1 -l 1 "$OUTPUT/landscape-thresholds.pdf" "$TMP_ROOT/threshold-page-1.txt"
+pdftotext -f 2 -l 2 "$OUTPUT/landscape-thresholds.pdf" "$TMP_ROOT/threshold-page-2.txt"
+pdftotext -f 4 -l 4 "$OUTPUT/landscape-thresholds.pdf" "$TMP_ROOT/threshold-page-4.txt"
+assert_contains "three path spans remain portrait" \
+  "THREE_SPANS_MARKER" "$TMP_ROOT/threshold-page-1.txt"
+assert_contains "four path spans totaling 159 characters remain portrait" \
+  "FOUR_SPANS_159_CHARS_MARKER" "$TMP_ROOT/threshold-page-1.txt"
+assert_contains "four path spans totaling 160 characters switch to landscape" \
+  "FOUR_SPANS_160_CHARS_MARKER" "$TMP_ROOT/threshold-page-2.txt"
+assert_contains "more than five columns still switch to landscape" \
+  "A1" "$TMP_ROOT/threshold-page-4.txt"
+
+run_status "explicit landscape threshold conversion succeeds" 0 \
+  "$CLI" "$SOURCE/explicit-landscape.md" "$OUTPUT/explicit-landscape.pdf"
+pdfinfo -f 1 -l 1 "$OUTPUT/explicit-landscape.pdf" > "$TMP_ROOT/explicit-landscape.info"
+if awk '
+  $1 == "Pages:" { pages = $2 }
+  $1 == "Page" && $2 == 1 && $3 == "size:" { landscape = $4 > $6 }
+  END { exit !(pages == 1 && landscape) }
+' "$TMP_ROOT/explicit-landscape.info"; then
+  pass "explicit landscape documents are not rotated or split again"
+else
+  fail "explicit landscape documents are not rotated or split again"
+fi
+pdftotext "$OUTPUT/explicit-landscape.pdf" "$TMP_ROOT/explicit-landscape.txt"
+assert_contains "explicit landscape keeps content before the table" \
+  "LANDSCAPE_DOCUMENT_BEFORE" "$TMP_ROOT/explicit-landscape.txt"
+assert_contains "explicit landscape keeps content after the table" \
+  "LANDSCAPE_DOCUMENT_AFTER" "$TMP_ROOT/explicit-landscape.txt"
 
 run_status "long table conversion succeeds" 0 \
   "$CLI" "$SOURCE/long-table.md" "$OUTPUT/long-table.pdf"

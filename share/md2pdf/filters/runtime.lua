@@ -1035,28 +1035,71 @@ local function div_alert(div)
   return alert_blocks(kind, div.content)
 end
 
-local function table_code(code)
+local MAX_PORTRAIT_TABLE_COLUMNS = 5
+local MIN_PATH_DENSE_TABLE_COLUMNS = 3
+local MIN_PATH_CODE_SPANS = 4
+local MIN_PATH_CODE_CHARACTERS = 160
+
+local function path_code_metrics(table_element)
+  local span_count = 0
+  local character_count = 0
+  table_element:walk({
+    Code = function(code)
+      if code.text:find("/", 1, true) then
+        span_count = span_count + 1
+        character_count = character_count + utf8.len(code.text)
+      end
+    end,
+  })
+  return span_count, character_count
+end
+
+local function is_path_dense_table(table_element)
+  local column_count = #table_element.colspecs
+  if column_count < MIN_PATH_DENSE_TABLE_COLUMNS or
+     column_count > MAX_PORTRAIT_TABLE_COLUMNS then
+    return false
+  end
+  local span_count, character_count = path_code_metrics(table_element)
+  return span_count >= MIN_PATH_CODE_SPANS and
+    character_count >= MIN_PATH_CODE_CHARACTERS
+end
+
+local function needs_landscape(table_element, base_orientation)
+  if base_orientation == "landscape" then return false end
+  return #table_element.colspecs > MAX_PORTRAIT_TABLE_COLUMNS or
+    is_path_dense_table(table_element)
+end
+
+local function table_code(landscape)
+  return function(code)
+    local landscape_value = landscape and "true" or "false"
+    return {
+      pandoc.RawInline("typst", "#md2pdf-table-code(landscape: " .. landscape_value .. ")["),
+      pandoc.Str(code.text),
+      pandoc.RawInline("typst", "]"),
+    }
+  end
+end
+
+local function landscape_table(table_element, base_orientation)
+  local base_flipped = base_orientation == "landscape" and "true" or "false"
   return {
-    pandoc.RawInline("typst", "#md2pdf-table-code["),
-    pandoc.Str(code.text),
-    pandoc.RawInline("typst", "]"),
+    pandoc.RawBlock("typst", "#pagebreak()\n#set page(flipped: true)"),
+    table_element,
+    pandoc.RawBlock("typst", "#pagebreak()\n#set page(flipped: " .. base_flipped .. ")"),
   }
 end
 
 local function prepare_table(config)
   return function(table_element)
+    local landscape = needs_landscape(table_element, config.page.orientation)
     local caption = table_element.caption
-    table_element = table_element:walk({ Code = table_code })
+    table_element = table_element:walk({ Code = table_code(landscape) })
     table_element.caption = caption
 
-    if #table_element.colspecs <= 5 or config.page.orientation == "landscape" then
-      return table_element
-    end
-    return {
-      pandoc.RawBlock("typst", "#pagebreak()\n#set page(flipped: true)"),
-      table_element,
-      pandoc.RawBlock("typst", "#pagebreak()\n#set page(flipped: false)"),
-    }
+    if not landscape then return table_element end
+    return landscape_table(table_element, config.page.orientation)
   end
 end
 

@@ -3,7 +3,7 @@
 #import "profiles/report.typ": report
 #import "profiles/academic.typ": academic
 #import "page.typ": page-layout
-#import "theme.typ": apply-theme
+#import "theme.typ": apply-theme, table-code
 
 #let profile-themes = (
   general: general,
@@ -11,6 +11,10 @@
   report: report,
   academic: academic,
 )
+
+#let md2pdf-table-code(config, body, landscape: false) = {
+  table-code(profile-themes.at(config.profile), body, landscape: landscape)
+}
 
 #let md2pdf-document(config: (:), body) = {
   let theme = profile-themes.at(config.profile)

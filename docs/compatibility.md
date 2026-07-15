@@ -83,6 +83,8 @@ destinations, or disable network access entirely.
 - curl is required only when a document contains an HTTPS image.
 - Fonts are external and can change line breaks, pagination, and glyph coverage.
 - Remote image failures produce placeholders rather than failing conversion.
-- Wide tables switch pages based on column count, not measured content width.
+- Tables with more than five columns switch to landscape. Tables with three to
+  five columns also switch when inline-code paths are dense enough to require
+  the extra width; content width is not otherwise measured.
 - Spanish and English labels are built in; other languages use English labels.
 - Full bidi behavior and perfect network isolation are not claimed.
