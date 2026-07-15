@@ -6,6 +6,7 @@ PROGRAM=md2pdf
 VERSION=0.1.0
 stage_dir=
 publish_tmp=
+caller_umask=$(umask)
 
 print_help() {
   cat <<'EOF'
@@ -84,6 +85,41 @@ canonical_path() {
     }
   fi
   absolute_path "$canonical_input"
+}
+
+file_identity() {
+  identity_path=$1
+  if identity_value=$(stat -c '%d:%i' "$identity_path" 2>/dev/null); then
+    printf '%s\n' "$identity_value"
+    return 0
+  fi
+  if identity_value=$(stat -f '%d:%i' "$identity_path" 2>/dev/null); then
+    printf '%s\n' "$identity_value"
+    return 0
+  fi
+  return 1
+}
+
+file_mode() {
+  mode_path=$1
+  if mode_value=$(stat -c '%a' "$mode_path" 2>/dev/null); then
+    printf '%s\n' "$mode_value"
+    return 0
+  fi
+  if mode_value=$(stat -f '%Lp' "$mode_path" 2>/dev/null); then
+    printf '%s\n' "$mode_value"
+    return 0
+  fi
+  return 1
+}
+
+mode_from_umask() {
+  case $caller_umask in
+    [0-7][0-7][0-7]|[0-7][0-7][0-7][0-7]) ;;
+    *) return 1 ;;
+  esac
+  mode_value=$((0666 & (0777 ^ 0$caller_umask)))
+  printf '%03o\n' "$mode_value"
 }
 
 valid_profile() {
@@ -202,8 +238,14 @@ output_identity=$(canonical_path "$output") || fail 3 "cannot resolve output pat
 if [ "$input_path" = "$output_identity" ]; then
   fail 3 "input and output must be different files"
 fi
-if { [ -e "$output" ] || [ -L "$output" ]; } && [ "$input" -ef "$output" ]; then
-  fail 3 "input and output must be different files"
+if [ -e "$output" ] || [ -L "$output" ]; then
+  input_identity=$(file_identity "$input_path") || \
+    fail 3 "cannot identify input file: $input"
+  target_identity=$(file_identity "$output_identity") || \
+    fail 3 "cannot identify output file: $output"
+  if [ "$input_identity" = "$target_identity" ]; then
+    fail 3 "input and output must be different files"
+  fi
 fi
 
 input_dir=$(dirname "$input_path")
@@ -218,6 +260,26 @@ script_dir=$(dirname "$script_ref")
 script_dir=$(CDPATH= cd -P "$script_dir" 2>/dev/null && pwd -P) || \
   fail 4 "cannot resolve the executable directory"
 
+required_runtime_files='filters/runtime.lua
+filters/citations.lua
+typst/template.typ
+typst/document.typ
+typst/theme.typ
+typst/page.typ
+typst/profiles/shared.typ
+typst/profiles/general.typ
+typst/profiles/technical.typ
+typst/profiles/report.typ
+typst/profiles/academic.typ'
+
+complete_data_dir() {
+  complete_candidate=$1
+  for complete_file in $required_runtime_files; do
+    [ -r "$complete_candidate/$complete_file" ] || return 1
+  done
+  return 0
+}
+
 data_dir=
 if [ -n "${MD2PDF_DATA_DIR+x}" ]; then
   [ -n "$MD2PDF_DATA_DIR" ] || fail 4 "MD2PDF_DATA_DIR is empty"
@@ -228,8 +290,7 @@ else
     "$script_dir/../share/md2pdf" \
     "${XDG_DATA_HOME:-${HOME:-}/.local/share}/md2pdf"
   do
-    if [ -f "$data_candidate/filters/runtime.lua" ] && \
-       [ -f "$data_candidate/typst/template.typ" ]; then
+    if complete_data_dir "$data_candidate"; then
       data_dir=$data_candidate
       break
     fi
@@ -239,14 +300,7 @@ fi
 [ -n "$data_dir" ] || fail 4 "cannot locate the md2pdf data directory"
 data_dir=$(canonical_path "$data_dir") || fail 4 "cannot resolve data directory: $data_dir"
 
-for runtime_file in \
-  filters/runtime.lua \
-  typst/template.typ \
-  typst/document.typ \
-  typst/theme.typ \
-  typst/page.typ \
-  typst/profiles/general.typ
-do
+for runtime_file in $required_runtime_files; do
   [ -r "$data_dir/$runtime_file" ] || \
     fail 4 "required runtime file is missing: $runtime_file"
 done
@@ -264,14 +318,18 @@ trap 'signal_exit 129' HUP
 trap 'signal_exit 130' INT
 trap 'signal_exit 143' TERM
 
-mkdir -p "$stage_dir/runtime/profiles" "$stage_dir/assets" || \
+mkdir -p "$stage_dir/runtime/profiles" "$stage_dir/assets" \
+  "$stage_dir/citations" || \
   fail 4 "cannot prepare the staging directory"
 for runtime_file in template.typ document.typ theme.typ page.typ; do
   cp "$data_dir/typst/$runtime_file" "$stage_dir/runtime/$runtime_file" || \
     fail 4 "cannot stage runtime file: typst/$runtime_file"
 done
-cp "$data_dir/typst/profiles/general.typ" "$stage_dir/runtime/profiles/general.typ" || \
-  fail 4 "cannot stage runtime file: typst/profiles/general.typ"
+for profile_file in shared.typ general.typ technical.typ report.typ academic.typ; do
+  cp "$data_dir/typst/profiles/$profile_file" \
+    "$stage_dir/runtime/profiles/$profile_file" || \
+    fail 4 "cannot stage runtime file: typst/profiles/$profile_file"
+done
 
 filter_error=$stage_dir/filter-error.txt
 pandoc_error=$stage_dir/pandoc-error.txt
@@ -282,10 +340,12 @@ if ! MD2PDF_STAGE_DIR=$stage_dir \
      pandoc "$input_path" \
        --from=markdown+yaml_metadata_block-raw_attribute-raw_html-raw_tex \
        --to=typst \
-       --standalone \
-       --template="$stage_dir/runtime/template.typ" \
-       --lua-filter="$data_dir/filters/runtime.lua" \
-       --resource-path="$input_dir" \
+        --standalone \
+        --template="$stage_dir/runtime/template.typ" \
+        --lua-filter="$data_dir/filters/runtime.lua" \
+        --citeproc \
+        --lua-filter="$data_dir/filters/citations.lua" \
+        --resource-path="$input_dir" \
        --wrap=none \
        --strip-comments \
        > "$stage_dir/document.typ" 2> "$pandoc_error"
@@ -294,8 +354,18 @@ then
     IFS= read -r filter_message < "$filter_error"
     fail 4 "$filter_message"
   fi
+  if [ -f "$stage_dir/citations-requested" ] && \
+     [ ! -f "$stage_dir/citations-processed" ]; then
+    show_tool_error "Citation processing failed" "$pandoc_error"
+    exit 4
+  fi
   show_tool_error "Pandoc conversion failed" "$pandoc_error"
   exit 6
+fi
+if [ -s "$pandoc_error" ]; then
+  while IFS= read -r pandoc_line || [ -n "$pandoc_line" ]; do
+    printf '%s\n' "$pandoc_line" >&2
+  done < "$pandoc_error"
 fi
 
 typst_error=$stage_dir/typst-error.txt
@@ -312,7 +382,13 @@ publish_tmp=$(mktemp "$output_dir/.md2pdf.XXXXXXXX.pdf") || \
 if ! cp "$stage_dir/output.pdf" "$publish_tmp"; then
   fail 7 "cannot copy the completed PDF into: $output_dir"
 fi
-chmod 644 "$publish_tmp" || fail 7 "cannot set final PDF permissions"
+if [ -f "$output_path" ] && [ ! -L "$output_path" ]; then
+  final_mode=$(file_mode "$output_path") || \
+    fail 7 "cannot read existing PDF permissions: $output_path"
+else
+  final_mode=$(mode_from_umask) || fail 7 "cannot interpret caller umask: $caller_umask"
+fi
+chmod "$final_mode" "$publish_tmp" || fail 7 "cannot set final PDF permissions"
 if ! mv -f "$publish_tmp" "$output_path"; then
   fail 7 "cannot publish the completed PDF: $output_path"
 fi

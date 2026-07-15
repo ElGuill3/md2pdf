@@ -5,4 +5,4 @@ md2pdf:
   toc: false
 ---
 
-![Remote resource](https://example.invalid/image.svg)
+![Remote resource](https://127.0.0.1:1/image.svg)

@@ -7,9 +7,45 @@ local error_file = os.getenv("MD2PDF_FILTER_ERROR")
 
 local profiles = {
   general = {},
-  technical = {},
-  report = {},
-  academic = {},
+  technical = {
+    page = {
+      margins = {
+        top = 56.69291339,
+        bottom = 56.69291339,
+        left = 51.02362205,
+        right = 51.02362205,
+      },
+    },
+    cover = true,
+    toc = { enabled = true, depth = 4 },
+    section_numbering = true,
+  },
+  report = {
+    page = {
+      margins = {
+        top = 70.86614173,
+        bottom = 70.86614173,
+        left = 70.86614173,
+        right = 70.86614173,
+      },
+    },
+    cover = true,
+    toc = { enabled = true, depth = 3 },
+    section_numbering = true,
+  },
+  academic = {
+    page = {
+      margins = {
+        top = 70.86614173,
+        bottom = 70.86614173,
+        left = 68.03149606,
+        right = 68.03149606,
+      },
+    },
+    cover = true,
+    toc = { enabled = false, depth = 3 },
+    section_numbering = true,
+  },
 }
 
 local base = {
@@ -491,17 +527,21 @@ local function write_config(config)
 end
 
 local staged_images = {}
+local staged_resources = {}
+local remote_images = {}
+local citation_keys = {}
+local max_remote_bytes = 5 * 1024 * 1024
 
-local function resolve_local_image(target)
+local function resolve_local_resource(target, label)
   if target:sub(1, 1) == "/" then
-    abort("absolute local image paths are not permitted: " .. target)
+    abort("absolute " .. label .. " paths are not permitted: " .. target)
   end
 
   local parts = {}
   for component in target:gmatch("[^/]+") do
     if component == ".." then
       if #parts == 0 then
-        abort("local image path escapes the source directory: " .. target)
+        abort(label .. " path escapes the source directory: " .. target)
       end
       table.remove(parts)
     elseif component ~= "." then
@@ -526,49 +566,47 @@ done
     "sh", { "-c", probe, "md2pdf-image-probe", source_dir, relative }, ""
   )
   if result == "symlink" then
-    abort("local image path traverses a symbolic link: " .. target)
+    abort(label .. " path traverses a symbolic link: " .. target)
   end
   return relative, source_dir .. "/" .. relative
 end
 
-local function copy_image(image)
-  local target = image.src:gsub("%%(%x%x)", function(hex)
-    return string.char(tonumber(hex, 16))
-  end)
-  if target:find("\0", 1, true) then
-    abort("local image targets cannot contain a null byte")
+local function safe_basename(relative, fallback)
+  local basename = relative:match("([^/]+)$") or fallback
+  basename = basename:gsub("[^%w._-]", "_")
+  if basename == "" or basename == "." or basename == ".." then
+    return fallback
   end
-  if target:match("^//") or target:match("^[%a][%w%+%.%-]*:") then
-    abort("remote image resources are not supported: " .. target)
+  return basename
+end
+
+local function copy_local_resource(target, label, directory)
+  if target:find("\0", 1, true) then
+    abort(label .. " paths cannot contain a null byte")
   end
   if target:find("[?#]") then
-    abort("local image targets cannot contain a query or fragment: " .. target)
+    abort(label .. " paths cannot contain a query or fragment: " .. target)
   end
 
-  local relative_source, source = resolve_local_image(target)
-
-  local existing = staged_images[source]
+  local relative_source, source = resolve_local_resource(target, label)
+  local existing = staged_resources[source]
   if existing then
-    image.src = existing
-    return image
+    return existing
   end
 
   local input, message = io.open(source, "rb")
   if not input then
-    abort("local image is missing or unreadable: " .. target .. " (" ..
+    abort(label .. " is missing or unreadable: " .. target .. " (" ..
       tostring(message) .. ")")
   end
 
-  local basename = relative_source:match("([^/]+)$") or "image"
-  basename = basename:gsub("[^%w._-]", "_")
-  if basename == "" or basename == "." or basename == ".." then
-    basename = "image"
-  end
-  local relative = "assets/" .. pandoc.sha1(source):sub(1, 16) .. "-" .. basename
+  local basename = safe_basename(relative_source, "resource")
+  local relative = directory .. "/" .. pandoc.sha1(source):sub(1, 16) ..
+    "-" .. basename
   local output, output_message = io.open(stage_dir .. "/" .. relative, "wb")
   if not output then
     input:close()
-    abort("cannot stage local image: " .. target .. " (" ..
+    abort("cannot stage " .. label .. ": " .. target .. " (" ..
       tostring(output_message) .. ")")
   end
 
@@ -580,7 +618,249 @@ local function copy_image(image)
   input:close()
   output:close()
 
-  staged_images[source] = relative
+  staged_resources[source] = relative
+  return relative
+end
+
+local function touch_stage_file(name)
+  local handle, message = io.open(stage_dir .. "/" .. name, "wb")
+  if not handle then
+    abort("cannot record citation state: " .. tostring(message))
+  end
+  handle:close()
+end
+
+local function citation_paths(value, path)
+  local kind = value_type(value)
+  if kind == "string" or kind == "Inlines" or kind == "Blocks" then
+    return { scalar(value, path, false) }
+  end
+  if (kind ~= "table" and kind ~= "List") or not is_sequence(value) then
+    abort(path .. " must be a string or list of strings")
+  end
+  local result = {}
+  for index, item in ipairs(value) do
+    result[index] = scalar(item, path .. "[" .. index .. "]", false)
+  end
+  return result
+end
+
+local function stage_citation_path(target, label, extension)
+  if target:match("^//") or target:match("^[%a][%w%+%.%-]*:") then
+    abort(label .. " must be a local " .. extension .. " file: " .. target)
+  end
+  if target:lower():sub(-#extension) ~= extension then
+    abort(label .. " must use the " .. extension .. " extension: " .. target)
+  end
+  return copy_local_resource(target, label, "citations")
+end
+
+local function register_references(value, path)
+  if value == nil then return end
+  local kind = value_type(value)
+  if (kind ~= "table" and kind ~= "List") or not is_sequence(value) then
+    abort(path .. " must be a list of citation records")
+  end
+  for index, reference in ipairs(value) do
+    local record = mapping(reference, path .. "[" .. index .. "]")
+    if record.id == nil then
+      abort(path .. "[" .. index .. "].id is required")
+    end
+    citation_keys[scalar(record.id, path .. "[" .. index .. "].id", false)] = true
+  end
+end
+
+local function register_bibliography(relative, target)
+  local handle, message = io.open(stage_dir .. "/" .. relative, "rb")
+  if not handle then
+    abort("bibliography is unreadable after staging: " .. target .. " (" ..
+      tostring(message) .. ")")
+  end
+  local contents = handle:read("*a")
+  handle:close()
+  local ok, bibliography = pcall(pandoc.read, contents, "bibtex")
+  if not ok then
+    abort("bibliography is invalid: " .. target)
+  end
+  register_references(bibliography.meta.references, "bibliography " .. target)
+end
+
+local function stage_citations(meta, config)
+  local requested = false
+  register_references(meta.references, "references")
+  if meta.bibliography ~= nil then
+    local staged = {}
+    for index, target in ipairs(citation_paths(meta.bibliography, "bibliography")) do
+      local relative = stage_citation_path(target, "bibliography", ".bib")
+      register_bibliography(relative, target)
+      staged[index] = pandoc.MetaString(stage_dir .. "/" .. relative)
+    end
+    meta.bibliography = pandoc.MetaList(staged)
+    requested = true
+    if meta["reference-section-title"] == nil then
+      local title = config.lang:lower():match("^es") and "Referencias" or "References"
+      meta["reference-section-title"] = pandoc.MetaString(title)
+    end
+  end
+
+  if meta.csl ~= nil then
+    local target = scalar(meta.csl, "csl", false)
+    meta.csl = pandoc.MetaString(
+      stage_dir .. "/" .. stage_citation_path(target, "csl", ".csl"))
+    requested = true
+  end
+
+  if requested then
+    touch_stage_file("citations-requested")
+  end
+  return meta
+end
+
+local function validate_citation_keys(document)
+  local unresolved = {}
+  document:walk({
+    Cite = function(cite)
+      for _, citation in ipairs(cite.citations) do
+        if not citation_keys[citation.id] then unresolved[citation.id] = true end
+      end
+    end,
+  })
+  local keys = {}
+  for key in pairs(unresolved) do keys[#keys + 1] = "@" .. key end
+  if #keys > 0 then
+    table.sort(keys)
+    abort("unresolved citation: " .. table.concat(keys, ", "))
+  end
+end
+
+local remote_mimes = {
+  ["image/png"] = ".png",
+  ["image/jpeg"] = ".jpg",
+  ["image/gif"] = ".gif",
+  ["image/svg+xml"] = ".svg",
+  ["image/webp"] = ".webp",
+}
+
+local function valid_image_payload(mime, payload)
+  if mime == "image/png" then
+    return payload:sub(1, 8) == "\137PNG\13\10\26\10"
+  end
+  if mime == "image/jpeg" then
+    return payload:sub(1, 3) == "\255\216\255"
+  end
+  if mime == "image/gif" then
+    local signature = payload:sub(1, 6)
+    return signature == "GIF87a" or signature == "GIF89a"
+  end
+  if mime == "image/webp" then
+    return payload:sub(1, 4) == "RIFF" and payload:sub(9, 12) == "WEBP"
+  end
+  if mime == "image/svg+xml" then
+    return payload:sub(1, 1024):lower():find("<svg", 1, true) ~= nil
+  end
+  return false
+end
+
+local function remote_placeholder(image, target, reason)
+  pandoc.log.warn("remote image unavailable; using linked placeholder (" ..
+    target .. "): " .. reason)
+  local description = stringify(image.caption)
+  if description == "" then description = "remote image" end
+  return pandoc.Link(
+    { pandoc.Str("Remote image unavailable: " .. description) },
+    target,
+    image.title
+  )
+end
+
+local function fetch_remote_image(image, target)
+  local existing = remote_images[target]
+  if existing then
+    image.src = existing
+    return image
+  end
+
+  local download = stage_dir .. "/assets/remote-" ..
+    pandoc.sha1(target):sub(1, 20) .. ".download"
+  local ok, mime = pcall(
+    pandoc.pipe,
+    "curl",
+    {
+      "--location",
+      "--fail",
+      "--silent",
+      "--show-error",
+      "--proto", "=https",
+      "--proto-redir", "=https",
+      "--connect-timeout", "5",
+      "--max-time", "20",
+      "--max-filesize", tostring(max_remote_bytes),
+      "--user-agent", "md2pdf/0.1",
+      "--output", download,
+      "--write-out", "%{content_type}",
+      "--",
+      target,
+    },
+    ""
+  )
+  if not ok then
+    os.remove(download)
+    return remote_placeholder(image, target, "HTTPS fetch failed")
+  end
+
+  mime = trim(mime):lower():match("^[^;%s]+") or ""
+  local extension = remote_mimes[mime]
+  if not extension then
+    os.remove(download)
+    return remote_placeholder(image, target,
+      "unsupported response MIME type '" .. (mime ~= "" and mime or "unknown") .. "'")
+  end
+
+  local input, message = io.open(download, "rb")
+  if not input then
+    return remote_placeholder(image, target,
+      "fetched payload is unreadable (" .. tostring(message) .. ")")
+  end
+  local payload = input:read(max_remote_bytes + 1) or ""
+  input:close()
+  if #payload > max_remote_bytes then
+    os.remove(download)
+    return remote_placeholder(image, target, "payload exceeds 5 MiB")
+  end
+  if not valid_image_payload(mime, payload) then
+    os.remove(download)
+    return remote_placeholder(image, target, "response is not a valid " .. mime .. " image")
+  end
+
+  local relative = "assets/remote-" .. pandoc.sha1(target):sub(1, 20) .. extension
+  if not os.rename(download, stage_dir .. "/" .. relative) then
+    os.remove(download)
+    return remote_placeholder(image, target, "cannot stage fetched payload")
+  end
+  remote_images[target] = relative
+  image.src = relative
+  return image
+end
+
+local function copy_image(image)
+  local target = image.src
+  local scheme = target:match("^([%a][%w%+%.%-]*):")
+  if target:match("^//") then
+    return remote_placeholder(image, target, "scheme-relative URLs are not permitted")
+  end
+  if scheme then
+    if scheme:lower() == "https" then
+      return fetch_remote_image(image, target)
+    end
+    return remote_placeholder(image, target,
+      "only HTTPS remote images are permitted (received " .. scheme:lower() .. ")")
+  end
+
+  target = target:gsub("%%(%x%x)", function(hex)
+    return string.char(tonumber(hex, 16))
+  end)
+  local relative = copy_local_resource(target, "local image", "assets")
+  staged_images[target] = relative
   image.src = relative
   return image
 end
@@ -589,6 +869,70 @@ local function reject_raw_typst(element)
   if element.format and element.format:lower() == "typst" then
     abort("raw Typst input is not permitted")
   end
+end
+
+local alert_kinds = {
+  note = true,
+  tip = true,
+  important = true,
+  warning = true,
+  caution = true,
+}
+
+local function alert_blocks(kind, blocks)
+  local result = {
+    pandoc.RawBlock("typst", '#md2pdf-alert("' .. kind .. '")[\n'),
+  }
+  for _, block in ipairs(blocks) do
+    result[#result + 1] = block
+  end
+  result[#result + 1] = pandoc.RawBlock("typst", "\n]\n")
+  return result
+end
+
+local function blockquote_alert(quote)
+  local first = quote.content[1]
+  if not first or (first.t ~= "Para" and first.t ~= "Plain") then
+    return nil
+  end
+  local marker = first.content[1]
+  if not marker or marker.t ~= "Str" then return nil end
+  local kind = marker.text:match("^%[!([%a]+)%]$")
+  if not kind then return nil end
+  kind = kind:lower()
+  if not alert_kinds[kind] then return nil end
+
+  first.content:remove(1)
+  if first.content[1] and
+     (first.content[1].t == "Space" or first.content[1].t == "SoftBreak" or
+      first.content[1].t == "LineBreak") then
+    first.content:remove(1)
+  end
+  if #first.content == 0 then
+    quote.content:remove(1)
+  end
+  return alert_blocks(kind, quote.content)
+end
+
+local function div_alert(div)
+  local kind
+  for _, class in ipairs(div.classes) do
+    if alert_kinds[class:lower()] then
+      kind = class:lower()
+      break
+    end
+  end
+  if not kind then return nil end
+
+  if div.content[1] and div.content[1].t == "Div" then
+    for _, class in ipairs(div.content[1].classes) do
+      if class == "title" then
+        div.content:remove(1)
+        break
+      end
+    end
+  end
+  return alert_blocks(kind, div.content)
 end
 
 local function wide_table(config)
@@ -606,12 +950,18 @@ end
 
 function Pandoc(document)
   local config = normalize(document.meta)
+  document.meta = stage_citations(document.meta, config)
+  validate_citation_keys(document)
   write_config(config)
 
   document = document:walk({
     Image = copy_image,
     RawBlock = reject_raw_typst,
     RawInline = reject_raw_typst,
+  })
+  document = document:walk({
+    BlockQuote = blockquote_alert,
+    Div = div_alert,
   })
   document = document:walk({ Table = wide_table(config) })
   return document

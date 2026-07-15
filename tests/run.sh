@@ -102,12 +102,35 @@ assert_absent() {
   if [ ! -e "$file" ]; then pass "$test_name"; else fail "$test_name"; fi
 }
 
-for dependency in pandoc typst pdfinfo pdftotext pdftoppm; do
+portable_mode() {
+  if mode_result=$(stat -c '%a' "$1" 2>/dev/null); then
+    printf '%s\n' "$mode_result"
+    return 0
+  fi
+  stat -f '%Lp' "$1" 2>/dev/null
+}
+
+for dependency in pandoc typst pdfinfo pdftotext pdftoppm pdffonts; do
   if ! command -v "$dependency" >/dev/null 2>&1; then
     printf 'missing test dependency: %s\n' "$dependency" >&2
     exit 99
   fi
 done
+
+if [ "${MD2PDF_TEST_NON_GIT_CHILD:-0}" = 1 ]; then
+  run_status "non-Git copy launcher passes POSIX shell syntax" 0 sh -n "$CLI"
+  if command -v git >/dev/null 2>&1 && \
+     git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    last_stderr=
+    fail "non-Git copy does not require a worktree"
+  else
+    pass "non-Git copy does not require a worktree"
+  fi
+  total=$((passed + failed))
+  printf '%s tests passed; %s tests failed; %s total\n' "$passed" "$failed" "$total"
+  [ "$failed" -eq 0 ]
+  exit
+fi
 
 run_status "help exits successfully" 0 "$CLI" --help
 assert_contains "help documents exit codes" "Exit codes:" "$last_stdout"
@@ -124,6 +147,14 @@ run_status "invalid metadata type is rejected" 4 \
   "$CLI" "$SOURCE/invalid-metadata.md" "$OUTPUT/invalid-metadata.pdf"
 assert_contains "invalid metadata type diagnostic is stable" \
   "md2pdf: toc must be a boolean" "$last_stderr"
+run_status "unsupported page value is rejected" 4 \
+  "$CLI" "$SOURCE/invalid-page-value.md" "$OUTPUT/invalid-page.pdf"
+assert_contains "unsupported page value diagnostic is clear" \
+  "md2pdf: md2pdf.page.paper has unsupported value 'tabloid'" "$last_stderr"
+run_status "unknown structure key is rejected" 4 \
+  "$CLI" "$SOURCE/invalid-header-key.md" "$OUTPUT/invalid-header.pdf"
+assert_contains "unknown structure key diagnostic is clear" \
+  "md2pdf: md2pdf.header contains unknown key 'color'" "$last_stderr"
 
 run_status "default output invocation succeeds" 0 "$CLI" "$SOURCE/simple.md"
 if [ -s "$SOURCE/simple.pdf" ]; then pass "default output is beside input"; else fail "default output is beside input"; fi
@@ -141,6 +172,28 @@ run_status "missing output parent is rejected" 3 \
   "$CLI" "$SOURCE/simple.md" "$OUTPUT/missing/result.pdf"
 run_status "identical canonical paths are rejected" 3 \
   "$CLI" "$SOURCE/simple.md" "$SOURCE/../source/simple.md"
+
+ln "$SOURCE/simple.md" "$OUTPUT/simple-hardlink.pdf"
+run_status "hard-linked output is rejected as the input file" 3 \
+  "$CLI" "$SOURCE/simple.md" "$OUTPUT/simple-hardlink.pdf"
+assert_contains "hard-link diagnostic is stable" \
+  "md2pdf: input and output must be different files" "$last_stderr"
+rm -f "$OUTPUT/simple-hardlink.pdf"
+
+ln -s "$SOURCE/simple.md" "$OUTPUT/simple-symlink.pdf"
+run_status "symlinked output is rejected as the input file" 3 \
+  "$CLI" "$SOURCE/simple.md" "$OUTPUT/simple-symlink.pdf"
+rm -f "$OUTPUT/simple-symlink.pdf"
+
+bsd_bin=$TMP_ROOT/bsd-stat-bin
+mkdir -p "$bsd_bin"
+cp "$SOURCE/bsd-stat" "$bsd_bin/stat"
+chmod +x "$bsd_bin/stat"
+ln "$SOURCE/simple.md" "$OUTPUT/bsd-hardlink.pdf"
+run_status "BSD stat fallback retains hard-link protection" 3 \
+  env PATH="$bsd_bin:$PATH" MD2PDF_REAL_STAT="$(command -v stat)" \
+    "$CLI" "$SOURCE/simple.md" "$OUTPUT/bsd-hardlink.pdf"
+rm -f "$OUTPUT/bsd-hardlink.pdf"
 
 dep_bin=$TMP_ROOT/dependency-bin
 mkdir -p "$dep_bin"
@@ -165,11 +218,119 @@ run_status "XDG data lookup supports detached launcher" 0 \
     "$SOURCE/simple.md" "$OUTPUT/xdg.pdf"
 if [ -s "$OUTPUT/xdg.pdf" ]; then pass "XDG lookup publishes PDF"; else fail "XDG lookup publishes PDF"; fi
 
+fallback_root=$TMP_ROOT/data-fallback
+mkdir -p "$fallback_root/bin/share/md2pdf/filters" "$fallback_root/share"
+cp "$CLI" "$fallback_root/bin/md2pdf"
+cp "$DATA/filters/runtime.lua" "$fallback_root/bin/share/md2pdf/filters/runtime.lua"
+cp -R "$DATA" "$fallback_root/share/md2pdf"
+run_status "data lookup skips an incomplete early candidate" 0 \
+  "$fallback_root/bin/md2pdf" "$SOURCE/simple.md" "$OUTPUT/data-fallback.pdf"
+if [ -s "$OUTPUT/data-fallback.pdf" ]; then
+  pass "later complete data installation publishes PDF"
+else
+  fail "later complete data installation publishes PDF"
+fi
+
 run_status "CLI profile overrides YAML profile" 0 \
   "$CLI" --profile technical "$SOURCE/profile-override.md" "$OUTPUT/profile.pdf"
 pdfinfo "$OUTPUT/profile.pdf" > "$TMP_ROOT/profile.info"
 assert_contains "normalized CLI profile reaches PDF metadata" \
   "profile-technical" "$TMP_ROOT/profile.info"
+
+for profile in general technical report academic; do
+  profile_pdf=$OUTPUT/profile-$profile.pdf
+  profile_text=$TMP_ROOT/profile-$profile.txt
+  profile_info=$TMP_ROOT/profile-$profile.info
+  run_status "$profile profile reference conversion succeeds" 0 \
+    "$CLI" --profile "$profile" "$SOURCE/profile-reference.md" "$profile_pdf"
+  pdfinfo "$profile_pdf" > "$profile_info"
+  pdftotext "$profile_pdf" "$profile_text"
+  assert_contains "$profile identity reaches PDF metadata" \
+    "profile-$profile" "$profile_info"
+  profile_pages=$(awk '/^Pages:/ { print $2 }' "$profile_info")
+  if [ "$profile_pages" -ge 2 ]; then
+    pass "$profile profile has representative front and body pages"
+  else
+    fail "$profile profile has representative front and body pages"
+  fi
+  profile_bytes=$(wc -c < "$profile_pdf")
+  if [ "$profile_bytes" -gt 30000 ]; then
+    pass "$profile profile PDF has substantive rendered size"
+  else
+    fail "$profile profile PDF has substantive rendered size"
+  fi
+  run_status "$profile cover page rasterizes" 0 \
+    pdftoppm -f 1 -singlefile -png -r 72 "$profile_pdf" "$TMP_ROOT/profile-$profile-cover"
+  run_status "$profile body page rasterizes" 0 \
+    pdftoppm -f "$profile_pages" -singlefile -png -r 72 \
+      "$profile_pdf" "$TMP_ROOT/profile-$profile-body"
+  case $profile in
+    general)
+      assert_contains "General keeps balanced cover identity" "Profile Reference" "$profile_text"
+      ;;
+    technical)
+      assert_contains "Technical has distinct running furniture" "TECHNICAL · Profile Reference" "$profile_text"
+      assert_contains "Technical numbers sections by default" "1. Architecture" "$profile_text"
+      ;;
+    report)
+      assert_contains "Report has formal running furniture" "REPORT · Profile Reference" "$profile_text"
+      assert_contains "Report numbers sections by default" "1. Architecture" "$profile_text"
+      ;;
+    academic)
+      assert_contains "Academic has restrained title label" "ACADEMIC" "$profile_text"
+      assert_contains "Academic numbers equations by default" "(1)" "$profile_text"
+      ;;
+  esac
+done
+
+for profile in technical report academic; do
+  if cmp "$TMP_ROOT/profile-general-cover.png" \
+      "$TMP_ROOT/profile-$profile-cover.png" >/dev/null 2>&1; then
+    fail "$profile cover is visually distinct from General"
+  else
+    pass "$profile cover is visually distinct from General"
+  fi
+done
+
+for profile in general technical report academic; do
+  run_status "$profile honors YAML structure overrides after CLI profile selection" 0 \
+    "$CLI" --profile "$profile" "$SOURCE/structure-overrides.md" \
+      "$OUTPUT/structure-$profile.pdf"
+  pdfinfo "$OUTPUT/structure-$profile.pdf" > "$TMP_ROOT/structure-$profile.info"
+  pdftotext "$OUTPUT/structure-$profile.pdf" "$TMP_ROOT/structure-$profile.txt"
+  pdftotext -bbox "$OUTPUT/structure-$profile.pdf" "$TMP_ROOT/structure-$profile.html"
+  structure_pages=$(awk '/^Pages:/ { print $2 }' "$TMP_ROOT/structure-$profile.info")
+  if [ "$structure_pages" -eq 1 ]; then
+    pass "$profile honors cover and TOC disable overrides"
+  else
+    fail "$profile honors cover and TOC disable overrides"
+  fi
+  if awk '/^Page size:/ { exit !($3 > $5) }' "$TMP_ROOT/structure-$profile.info"; then
+    pass "$profile honors landscape paper override"
+  else
+    fail "$profile honors landscape paper override"
+  fi
+  assert_not_contains "$profile keeps TOC disabled" "Contents" "$TMP_ROOT/structure-$profile.txt"
+  assert_not_contains "$profile keeps section numbering disabled" \
+    "1. Override heading" "$TMP_ROOT/structure-$profile.txt"
+  assert_not_contains "$profile keeps default profile header disabled" \
+    " · Structure Overrides" "$TMP_ROOT/structure-$profile.txt"
+  if awk -F'"' '/>Override</ { found=1; ok=($2 >= 70 && $2 <= 100); exit } END { exit !(found && ok) }' \
+      "$TMP_ROOT/structure-$profile.html"; then
+    pass "$profile honors one-inch margin override"
+  else
+    fail "$profile honors one-inch margin override"
+  fi
+
+  run_status "$profile honors YAML TOC depth override" 0 \
+    "$CLI" --profile "$profile" "$SOURCE/toc-depth-override.md" \
+      "$OUTPUT/toc-depth-$profile.pdf"
+  pdftotext -f 1 -l 1 "$OUTPUT/toc-depth-$profile.pdf" "$TMP_ROOT/toc-depth-$profile.txt"
+  assert_contains "$profile TOC includes level-one heading" \
+    "Top-level entry" "$TMP_ROOT/toc-depth-$profile.txt"
+  assert_not_contains "$profile TOC excludes level-two heading at depth one" \
+    "Nested entry" "$TMP_ROOT/toc-depth-$profile.txt"
+done
 
 run_status "complex typed YAML succeeds" 0 \
   "$CLI" "$SOURCE/complex.md" "$OUTPUT/complex.pdf"
@@ -191,6 +352,81 @@ assert_contains "multiline subtitle first line survives" \
   "First subtitle line" "$TMP_ROOT/metadata-special.txt"
 assert_contains "multiline subtitle second line survives" \
   "Second subtitle line" "$TMP_ROOT/metadata-special.txt"
+
+run_status "academic citation and bibliography conversion succeeds" 0 \
+  "$CLI" "$SOURCE/academic-citation.md" "$OUTPUT/academic-citation.pdf"
+pdftotext "$OUTPUT/academic-citation.pdf" "$TMP_ROOT/academic-citation.txt"
+assert_contains "custom CSL formats first citation" "[1]" "$TMP_ROOT/academic-citation.txt"
+assert_contains "bibliography receives English localized heading" \
+  "References" "$TMP_ROOT/academic-citation.txt"
+assert_contains "first bibliography record is rendered" \
+  "Lamport, Leslie" "$TMP_ROOT/academic-citation.txt"
+assert_contains "second bibliography record is rendered" \
+  "Pandoc user’s guide" "$TMP_ROOT/academic-citation.txt"
+assert_contains "academic display equation is numbered" "(1)" "$TMP_ROOT/academic-citation.txt"
+
+run_status "missing bibliography fails critically" 4 \
+  "$CLI" "$SOURCE/missing-bibliography.md" "$OUTPUT/missing-bibliography.pdf"
+assert_contains "missing bibliography diagnostic is clear" \
+  "md2pdf: bibliography is missing or unreadable: assets/does-not-exist.bib" "$last_stderr"
+assert_absent "missing bibliography publishes no PDF" "$OUTPUT/missing-bibliography.pdf"
+
+run_status "invalid bibliography fails critically" 4 \
+  "$CLI" "$SOURCE/invalid-bibliography.md" "$OUTPUT/invalid-bibliography.pdf"
+assert_contains "invalid bibliography diagnostic is clear" \
+  "md2pdf: bibliography is invalid: assets/invalid.bib" "$last_stderr"
+assert_absent "invalid bibliography publishes no PDF" "$OUTPUT/invalid-bibliography.pdf"
+
+run_status "unresolved citation fails critically" 4 \
+  "$CLI" "$SOURCE/unresolved-citation.md" "$OUTPUT/unresolved-citation.pdf"
+assert_contains "unresolved citation diagnostic names the key" \
+  "md2pdf: unresolved citation: @missing-key" "$last_stderr"
+assert_absent "unresolved citation publishes no PDF" "$OUTPUT/unresolved-citation.pdf"
+
+cp "$SOURCE/assets/references.bib" "$TMP_ROOT/outside.bib"
+printf '%s\n' \
+  '---' \
+  'title: Escaping Bibliography' \
+  'bibliography: ../outside.bib' \
+  'md2pdf:' \
+  '  cover: false' \
+  '  toc: false' \
+  '---' \
+  'Escaping citation [@lamport1994].' > "$SOURCE/escaping-bibliography.md"
+run_status "escaping bibliography path is rejected" 4 \
+  "$CLI" "$SOURCE/escaping-bibliography.md" "$OUTPUT/escaping-bibliography.pdf"
+assert_contains "escaping bibliography diagnostic is clear" \
+  "md2pdf: bibliography path escapes the source directory: ../outside.bib" "$last_stderr"
+
+ln -s "$TMP_ROOT/outside.bib" "$SOURCE/assets/linked.bib"
+printf '%s\n' \
+  '---' \
+  'title: Linked Bibliography' \
+  'bibliography: assets/linked.bib' \
+  'md2pdf:' \
+  '  cover: false' \
+  '  toc: false' \
+  '---' \
+  'Linked citation [@lamport1994].' > "$SOURCE/linked-bibliography.md"
+run_status "symlinked bibliography path is rejected" 4 \
+  "$CLI" "$SOURCE/linked-bibliography.md" "$OUTPUT/linked-bibliography.pdf"
+assert_contains "symlinked bibliography diagnostic is clear" \
+  "md2pdf: bibliography path traverses a symbolic link: assets/linked.bib" "$last_stderr"
+
+printf '%s\n' \
+  '---' \
+  'title: Typed Bibliography' \
+  'bibliography:' \
+  '  path: assets/references.bib' \
+  'md2pdf:' \
+  '  cover: false' \
+  '  toc: false' \
+  '---' \
+  'Wrong type.' > "$SOURCE/typed-bibliography.md"
+run_status "bibliography mapping type is rejected" 4 \
+  "$CLI" "$SOURCE/typed-bibliography.md" "$OUTPUT/typed-bibliography.pdf"
+assert_contains "bibliography type diagnostic is clear" \
+  "md2pdf: bibliography must be a string or list of strings" "$last_stderr"
 
 run_status "local SVG conversion succeeds" 0 \
   "$CLI" "$SOURCE/local-svg.md" "$OUTPUT/local-svg.pdf"
@@ -242,15 +478,120 @@ if cmp "$OUTPUT/atomic.pdf" "$TMP_ROOT/atomic.expected" >/dev/null 2>&1; then
 else
   fail "failed conversion preserves existing target"
 fi
-run_status "remote asset aborts before publication" 4 \
+
+run_status "new PDF honors caller umask" 0 \
+  sh -c 'umask 027; exec "$1" "$2" "$3"' sh \
+    "$CLI" "$SOURCE/simple.md" "$OUTPUT/umask.pdf"
+umask_mode=$(portable_mode "$OUTPUT/umask.pdf")
+if [ "$umask_mode" = 640 ]; then
+  pass "new PDF mode reflects 0666 masked by 027"
+else
+  printf '  expected mode 640, received %s\n' "$umask_mode" >&2
+  fail "new PDF mode reflects 0666 masked by 027"
+fi
+
+printf 'existing target\n' > "$OUTPUT/preserved-mode.pdf"
+chmod 600 "$OUTPUT/preserved-mode.pdf"
+run_status "existing PDF mode is preserved across atomic replacement" 0 \
+  sh -c 'umask 022; exec "$1" "$2" "$3"' sh \
+    "$CLI" "$SOURCE/simple.md" "$OUTPUT/preserved-mode.pdf"
+preserved_mode=$(portable_mode "$OUTPUT/preserved-mode.pdf")
+if [ "$preserved_mode" = 600 ]; then
+  pass "atomic replacement preserves target mode"
+else
+  printf '  expected mode 600, received %s\n' "$preserved_mode" >&2
+  fail "atomic replacement preserves target mode"
+fi
+run_status "HTTPS fetch failure degrades to a placeholder" 0 \
   "$CLI" "$SOURCE/remote-asset.md" "$OUTPUT/remote.pdf"
-if [ ! -e "$OUTPUT/remote.pdf" ]; then pass "remote failure publishes no PDF"; else fail "remote failure publishes no PDF"; fi
+assert_contains "HTTPS fetch warning is clear" \
+  "remote image unavailable; using linked placeholder" "$last_stderr"
+pdftotext "$OUTPUT/remote.pdf" "$TMP_ROOT/remote.txt"
+assert_contains "HTTPS failure placeholder is visible" \
+  "Remote image unavailable: Remote resource" "$TMP_ROOT/remote.txt"
+
+run_status "HTTP image is blocked without aborting conversion" 0 \
+  "$CLI" "$SOURCE/remote-http.md" "$OUTPUT/remote-http.pdf"
+assert_contains "HTTP policy warning names HTTPS requirement" \
+  "only HTTPS remote images are permitted (received http)" "$last_stderr"
+pdftotext "$OUTPUT/remote-http.pdf" "$TMP_ROOT/remote-http.txt"
+assert_contains "HTTP placeholder is visible" \
+  "Remote image unavailable: HTTP resource" "$TMP_ROOT/remote-http.txt"
+
+run_status "file URI image is blocked without local access" 0 \
+  "$CLI" "$SOURCE/remote-file-uri.md" "$OUTPUT/remote-file-uri.pdf"
+assert_contains "file URI policy warning is clear" \
+  "only HTTPS remote images are permitted (received file)" "$last_stderr"
+pdftotext "$OUTPUT/remote-file-uri.pdf" "$TMP_ROOT/remote-file-uri.txt"
+assert_contains "file URI placeholder is visible" \
+  "Remote image unavailable: Local URI" "$TMP_ROOT/remote-file-uri.txt"
+
+remote_bin=$TMP_ROOT/remote-bin
+mkdir -p "$remote_bin"
+cp "$SOURCE/mock-curl" "$remote_bin/curl"
+chmod +x "$remote_bin/curl"
+run_status "bounded HTTPS fetch stages valid images and replaces invalid responses" 0 \
+  env PATH="$remote_bin:$PATH" "$CLI" "$SOURCE/remote-mock.md" "$OUTPUT/remote-mock.pdf"
+remote_mock_stderr=$last_stderr
+assert_contains "remote MIME rejection warning is clear" \
+  "unsupported response MIME type 'text/html'" "$remote_mock_stderr"
+assert_contains "remote size rejection warning is clear" \
+  "payload exceeds 5 MiB" "$remote_mock_stderr"
+pdftotext "$OUTPUT/remote-mock.pdf" "$TMP_ROOT/remote-mock.txt"
+assert_contains "successfully fetched image keeps its caption" \
+  "Fetched image" "$TMP_ROOT/remote-mock.txt"
+assert_contains "wrong MIME response becomes a visible placeholder" \
+  "Remote image unavailable: Wrong MIME" "$TMP_ROOT/remote-mock.txt"
+assert_contains "oversized response becomes a visible placeholder" \
+  "Remote image unavailable: Oversized image" "$TMP_ROOT/remote-mock.txt"
 
 run_status "raw Typst remains inert" 0 \
   "$CLI" "$SOURCE/raw-typst.md" "$OUTPUT/raw-typst.pdf"
 pdftotext "$OUTPUT/raw-typst.pdf" "$TMP_ROOT/raw-typst.txt"
 assert_contains "raw Typst source remains literal" \
   '#panic("RAW_TYPST_EXECUTED")' "$TMP_ROOT/raw-typst.txt"
+
+run_status "semantic alert conversion succeeds" 0 \
+  "$CLI" "$SOURCE/alerts.md" "$OUTPUT/alerts.pdf"
+pdftotext "$OUTPUT/alerts.pdf" "$TMP_ROOT/alerts.txt"
+for alert_label in Note Tip Important Warning Caution; do
+  assert_contains "$alert_label alert label is rendered" "$alert_label" "$TMP_ROOT/alerts.txt"
+done
+assert_contains "unknown alert marker remains an ordinary quote" \
+  "[!UNKNOWN] Unknown markers remain ordinary quotations." "$TMP_ROOT/alerts.txt"
+run_status "alert page rasterizes" 0 \
+  pdftoppm -f 1 -singlefile -png -r 96 "$OUTPUT/alerts.pdf" "$TMP_ROOT/alerts"
+
+gfm_stage=$TMP_ROOT/gfm-alert-stage
+mkdir -p "$gfm_stage/assets" "$gfm_stage/citations"
+run_status "native GFM alert AST is transformed by real Pandoc" 0 \
+  env MD2PDF_STAGE_DIR="$gfm_stage" \
+    MD2PDF_SOURCE_DIR="$SOURCE" \
+    MD2PDF_CLI_PROFILE= \
+    MD2PDF_FILTER_ERROR="$gfm_stage/filter-error.txt" \
+    pandoc "$SOURCE/alerts.md" --from=gfm --to=typst \
+      --lua-filter="$DATA/filters/runtime.lua" \
+      --citeproc \
+      --lua-filter="$DATA/filters/citations.lua"
+assert_contains "GFM NOTE becomes the shared semantic component" \
+  '#md2pdf-alert("note")' "$last_stdout"
+
+run_status "Spanish report conversion succeeds" 0 \
+  "$CLI" "$SOURCE/spanish.md" "$OUTPUT/spanish.pdf"
+pdftotext "$OUTPUT/spanish.pdf" "$TMP_ROOT/spanish.txt"
+assert_contains "Spanish TOC label is localized" "Índice" "$TMP_ROOT/spanish.txt"
+assert_contains "Spanish report furniture is localized" "INFORME" "$TMP_ROOT/spanish.txt"
+assert_contains "Spanish alert label is localized" "Nota" "$TMP_ROOT/spanish.txt"
+
+run_status "multilingual glyph fallback conversion succeeds" 0 \
+  "$CLI" "$SOURCE/multilingual.md" "$OUTPUT/multilingual.pdf"
+pdftotext "$OUTPUT/multilingual.pdf" "$TMP_ROOT/multilingual.txt"
+pdffonts "$OUTPUT/multilingual.pdf" > "$TMP_ROOT/multilingual.fonts"
+assert_contains "Greek glyphs survive extraction" "Ελληνικά" "$TMP_ROOT/multilingual.txt"
+assert_contains "CJK glyphs survive extraction" "中文排版测试" "$TMP_ROOT/multilingual.txt"
+assert_contains "Arabic fallback font is embedded" "NotoNaskhArabic" "$TMP_ROOT/multilingual.fonts"
+assert_contains "CJK fallback font is embedded" "NotoSerifCJK" "$TMP_ROOT/multilingual.fonts"
+assert_contains "Hebrew glyphs survive extraction" "עברית" "$TMP_ROOT/multilingual.txt"
 
 no_write_source=$TMP_ROOT/no-source-writes
 mkdir -p "$no_write_source/assets"
@@ -310,7 +651,21 @@ run_status "wide table page rasterizes" 0 \
 
 run_status "launcher passes POSIX shell syntax" 0 sh -n "$CLI"
 run_status "test runner passes POSIX shell syntax" 0 sh -n "$ROOT/tests/run.sh"
-run_status "worktree has no whitespace errors" 0 git -C "$ROOT" diff --check
+
+non_git_root=$TMP_ROOT/non-git-copy
+mkdir -p "$non_git_root"
+cp "$CLI" "$non_git_root/md2pdf"
+cp -R "$ROOT/share" "$non_git_root/share"
+cp -R "$ROOT/tests" "$non_git_root/tests"
+run_status "test harness runs from a non-Git source copy" 0 \
+  env MD2PDF_TEST_NON_GIT_CHILD=1 "$non_git_root/tests/run.sh"
+
+if command -v git >/dev/null 2>&1 && \
+   git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  run_status "worktree has no whitespace errors" 0 git -C "$ROOT" diff --check
+else
+  pass "whitespace check is skipped outside a Git worktree"
+fi
 
 total=$((passed + failed))
 printf '%s tests passed; %s tests failed; %s total\n' "$passed" "$failed" "$total"

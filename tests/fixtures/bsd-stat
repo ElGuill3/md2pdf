@@ -1,0 +1,16 @@
+#!/bin/sh
+
+case ${1:-} in
+  -c)
+    exit 1
+    ;;
+  -f)
+    format=$2
+    path=$3
+    case $format in
+      '%d:%i') exec "$MD2PDF_REAL_STAT" -c '%d:%i' "$path" ;;
+      '%Lp') exec "$MD2PDF_REAL_STAT" -c '%a' "$path" ;;
+    esac
+    ;;
+esac
+exit 1

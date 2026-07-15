@@ -1,0 +1,34 @@
+#!/bin/sh
+
+output=
+url=
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    --output)
+      output=$2
+      shift 2
+      ;;
+    --)
+      shift
+      url=$1
+      break
+      ;;
+    *) shift ;;
+  esac
+done
+
+case $url in
+  */success.svg)
+    printf '%s\n' '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><rect width="120" height="40" fill="#1a3c6e"/></svg>' > "$output"
+    printf '%s' 'image/svg+xml'
+    ;;
+  */wrong.svg)
+    printf '%s\n' '<html>not an image</html>' > "$output"
+    printf '%s' 'text/html'
+    ;;
+  */large.svg)
+    dd if=/dev/zero of="$output" bs=1048576 count=6 2>/dev/null
+    printf '%s' 'image/svg+xml'
+    ;;
+  *) exit 22 ;;
+esac

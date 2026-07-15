@@ -1,12 +1,15 @@
 #import "profiles/general.typ": general
+#import "profiles/technical.typ": technical
+#import "profiles/report.typ": report
+#import "profiles/academic.typ": academic
 #import "page.typ": page-layout
 #import "theme.typ": apply-theme
 
 #let profile-themes = (
   general: general,
-  technical: general,
-  report: general,
-  academic: general,
+  technical: technical,
+  report: report,
+  academic: academic,
 )
 
 #let md2pdf-document(config: (:), body) = {
@@ -22,6 +25,6 @@
   page-layout(
     config,
     theme,
-    apply-theme(theme, body),
+    apply-theme(config, theme, body),
   )
 }
