@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120" viewBox="0 0 320 120">
+  <rect width="320" height="120" rx="12" fill="#1a3c6e"/>
+  <circle cx="60" cy="60" r="28" fill="#c2a24a"/>
+  <text x="110" y="70" fill="white" font-family="sans-serif" font-size="28">md2pdf</text>
+</svg>

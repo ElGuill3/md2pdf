@@ -1,127 +1,321 @@
-#!/usr/bin/env zsh
-# md2pdf — Convierte Markdown a PDF estilizado con Typst
-# Uso: md2pdf entrada.md [salida.pdf]
+#!/bin/sh
 
-set -euo pipefail
+set -u
 
-if (( $# < 1 || $# > 2 )); then
-  echo "Uso: md2pdf <archivo.md> [salida.pdf]" >&2
-  exit 1
-fi
+PROGRAM=md2pdf
+VERSION=0.1.0
+stage_dir=
+publish_tmp=
 
-TEMPLATE_DIR="${0:A:h}"
-INPUT="$1"
-OUTPUT="${2:-${INPUT%.md}.pdf}"
-TMP_TYP=""
+print_help() {
+  cat <<'EOF'
+Usage: md2pdf [OPTIONS] INPUT [OUTPUT]
 
-# ── Función de limpieza (se ejecuta siempre, incluso en error) ─────────────
-cleanup() {
-  if [[ -n "$TMP_TYP" ]]; then rm -f -- "$TMP_TYP"; fi
+Convert Markdown to a styled PDF with Pandoc and Typst.
+
+Options:
+  -o, --output FILE      Write the PDF to FILE.
+      --profile NAME     Override the metadata profile.
+  -h, --help             Show this help and exit.
+      --version          Show the version and exit.
+
+Profiles: general, technical, report, academic
+
+The default output is placed beside INPUT. OUTPUT is retained as a legacy
+positional form and cannot be combined with --output.
+
+Metadata uses the md2pdf mapping. md2pdf.profile selects a profile; a
+top-level profile key is accepted as a compatibility alias.
+
+Exit codes:
+  0  Success, help, or version
+  2  Invalid command-line usage
+  3  Invalid input or output path
+  4  Invalid runtime data, metadata, or resource
+  5  Missing runtime dependency
+  6  Pandoc or Typst conversion failure
+  7  Atomic publication failure
+EOF
 }
-trap cleanup EXIT
 
-# ── Validaciones ──────────────────────────────────────────────────────────
-if [[ ! -f "$INPUT" ]]; then
-  echo "Error: no se encontró el archivo '$INPUT'" >&2
-  exit 1
-fi
+usage_error() {
+  printf '%s: %s\n' "$PROGRAM" "$1" >&2
+  printf "Try '%s --help' for usage.\n" "$PROGRAM" >&2
+  exit 2
+}
 
-INPUT_PATH="${INPUT:A}"
-OUTPUT_PATH="${OUTPUT:A}"
-if [[ "$INPUT_PATH" == "$OUTPUT_PATH" ]]; then
-  echo "Error: input and output must be different files." >&2
-  exit 1
-fi
-INPUT_DIR="${INPUT_PATH:h}"
+fail() {
+  fail_code=$1
+  shift
+  printf '%s: %s\n' "$PROGRAM" "$*" >&2
+  exit "$fail_code"
+}
 
-if [[ "${INPUT##*.}" != "md" ]]; then
-  echo "Advertencia: el archivo no tiene extensión .md, se continuará de todas formas."
-fi
-
-for cmd in pandoc typst; do
-  if ! command -v "$cmd" &>/dev/null; then
-    echo "Error: '$cmd' no está instalado o no está en el PATH." >&2
-    exit 1
+cleanup() {
+  if [ -n "$publish_tmp" ]; then
+    rm -f "$publish_tmp"
   fi
+  if [ -n "$stage_dir" ]; then
+    rm -rf "$stage_dir"
+  fi
+}
+
+signal_exit() {
+  signal_status=$1
+  trap - 0 HUP INT TERM
+  cleanup
+  exit "$signal_status"
+}
+
+absolute_path() {
+  absolute_input=$1
+  absolute_parent=$(dirname "$absolute_input") || return 1
+  absolute_name=$(basename "$absolute_input") || return 1
+  absolute_parent=$(CDPATH= cd -P "$absolute_parent" 2>/dev/null && pwd -P) || return 1
+  printf '%s/%s\n' "$absolute_parent" "$absolute_name"
+}
+
+canonical_path() {
+  canonical_input=$1
+  if command -v realpath >/dev/null 2>&1; then
+    canonical_result=$(realpath "$canonical_input" 2>/dev/null) && {
+      printf '%s\n' "$canonical_result"
+      return 0
+    }
+  fi
+  absolute_path "$canonical_input"
+}
+
+valid_profile() {
+  case $1 in
+    general|technical|report|academic) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+show_tool_error() {
+  tool_message=$1
+  tool_log=$2
+  printf '%s: %s\n' "$PROGRAM" "$tool_message" >&2
+  while IFS= read -r tool_line || [ -n "$tool_line" ]; do
+    printf '  %s\n' "$tool_line" >&2
+  done < "$tool_log"
+}
+
+input=
+legacy_output=
+option_output=
+cli_profile=
+
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    -h|--help)
+      print_help
+      exit 0
+      ;;
+    --version)
+      printf '%s %s\n' "$PROGRAM" "$VERSION"
+      exit 0
+      ;;
+    -o|--output)
+      [ "$#" -ge 2 ] || usage_error "option '$1' requires a file"
+      [ -z "$option_output" ] || usage_error "output was specified more than once"
+      option_output=$2
+      shift 2
+      ;;
+    --output=*)
+      [ -z "$option_output" ] || usage_error "output was specified more than once"
+      option_output=${1#*=}
+      [ -n "$option_output" ] || usage_error "option '--output' requires a file"
+      shift
+      ;;
+    --profile)
+      [ "$#" -ge 2 ] || usage_error "option '--profile' requires a name"
+      [ -z "$cli_profile" ] || usage_error "profile was specified more than once"
+      cli_profile=$2
+      shift 2
+      ;;
+    --profile=*)
+      [ -z "$cli_profile" ] || usage_error "profile was specified more than once"
+      cli_profile=${1#*=}
+      [ -n "$cli_profile" ] || usage_error "option '--profile' requires a name"
+      shift
+      ;;
+    --)
+      shift
+      while [ "$#" -gt 0 ]; do
+        if [ -z "$input" ]; then
+          input=$1
+        elif [ -z "$legacy_output" ]; then
+          legacy_output=$1
+        else
+          usage_error "too many positional arguments"
+        fi
+        shift
+      done
+      ;;
+    -*) usage_error "unknown option: $1" ;;
+    *)
+      if [ -z "$input" ]; then
+        input=$1
+      elif [ -z "$legacy_output" ]; then
+        legacy_output=$1
+      else
+        usage_error "too many positional arguments"
+      fi
+      shift
+      ;;
+  esac
 done
 
-if [[ ! -f "${TEMPLATE_DIR}/template.typ" ]]; then
-  echo "Error: no se encontró la plantilla en '${TEMPLATE_DIR}/template.typ'" >&2
-  exit 1
+[ -n "$input" ] || usage_error "an input file is required"
+[ -z "$legacy_output" ] || [ -z "$option_output" ] || \
+  usage_error "positional OUTPUT cannot be combined with --output"
+
+if [ -n "$cli_profile" ] && ! valid_profile "$cli_profile"; then
+  usage_error "invalid profile '$cli_profile'"
 fi
 
-if [[ ! -f "${TEMPLATE_DIR}/tables.lua" ]]; then
-  echo "Error: no se encontró el filtro en '${TEMPLATE_DIR}/tables.lua'" >&2
-  exit 1
+if [ -n "$option_output" ]; then
+  output=$option_output
+elif [ -n "$legacy_output" ]; then
+  output=$legacy_output
+else
+  case $input in
+    *.md|*.MD|*.markdown|*.MARKDOWN) output=${input%.*}.pdf ;;
+    *) output=$input.pdf ;;
+  esac
 fi
 
-# ── Extraer metadatos YAML (frontmatter entre líneas --- ) ─────────────────
-# Función: extrae un campo del frontmatter y escapa comillas dobles para Typst
-extract_meta() {
-  local field="$1"
-  # Busca solo dentro del bloque frontmatter (primeras líneas entre --- y ---)
-  awk "
-    /^---/ { if (NR==1) { in_front=1; next } else { in_front=0 } }
-    in_front && /^${field}:/ {
-      sub(/^${field}:[[:space:]]*/, \"\")
-      gsub(/^\"|\"$/, \"\")
-      print
-      exit
-    }
-  " "$INPUT"
-}
+[ -f "$input" ] || fail 3 "input is not a regular file: $input"
+[ -r "$input" ] || fail 3 "input is not readable: $input"
 
-TITLE=$(extract_meta "title")
-AUTHOR=$(extract_meta "author")
-DATE=$(extract_meta "date")
-SUBTITLE=$(extract_meta "subtitle")
-TOC=$(extract_meta "toc")
-NUMBER_SECTIONS=$(extract_meta "number-sections")
+output_parent=$(dirname "$output") || fail 3 "cannot resolve output parent: $output"
+[ -d "$output_parent" ] || fail 3 "output parent is not a directory: $output_parent"
+[ -w "$output_parent" ] || fail 3 "output parent is not writable: $output_parent"
+[ ! -d "$output" ] || fail 3 "output path is a directory: $output"
 
-# Valores por defecto
-TITLE="${TITLE:-Documento}"
-TOC_VAL="true"
-if [[ "$TOC" == "false" ]]; then TOC_VAL="false"; fi
-NUMBER_SECTIONS_VAL="false"
-if [[ "$NUMBER_SECTIONS" == "true" ]]; then NUMBER_SECTIONS_VAL="true"; fi
+input_path=$(canonical_path "$input") || fail 3 "cannot resolve input path: $input"
+output_path=$(absolute_path "$output") || fail 3 "cannot resolve output path: $output"
+output_identity=$(canonical_path "$output") || fail 3 "cannot resolve output path: $output"
 
-# Escapar barras y comillas dobles para que no rompan el Typst generado
-escape_typst() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' }
+if [ "$input_path" = "$output_identity" ]; then
+  fail 3 "input and output must be different files"
+fi
+if { [ -e "$output" ] || [ -L "$output" ]; } && [ "$input" -ef "$output" ]; then
+  fail 3 "input and output must be different files"
+fi
 
-TITLE_ESC=$(escape_typst "$TITLE")
-AUTHOR_ESC=$(escape_typst "$AUTHOR")
-DATE_ESC=$(escape_typst "$DATE")
-SUBTITLE_ESC=$(escape_typst "$SUBTITLE")
+input_dir=$(dirname "$input_path")
+output_dir=$(dirname "$output_path")
 
-# ── Generar archivo .typ temporal ─────────────────────────────────────────
-TMP_TYP="$(mktemp "${INPUT_DIR}/.md2pdf.XXXXXXXX.typ")"
-cat "${TEMPLATE_DIR}/template.typ" > "$TMP_TYP"
-cat >> "$TMP_TYP" << TYPSTEOF
+script_ref=$0
+case $script_ref in
+  */*) ;;
+  *) script_ref=$(command -v "$script_ref" 2>/dev/null || printf '%s' "$script_ref") ;;
+esac
+script_dir=$(dirname "$script_ref")
+script_dir=$(CDPATH= cd -P "$script_dir" 2>/dev/null && pwd -P) || \
+  fail 4 "cannot resolve the executable directory"
 
-#show: project.with(
-  title: "${TITLE_ESC}",
-  subtitle: "${SUBTITLE_ESC}",
-  author: "${AUTHOR_ESC}",
-  date: "${DATE_ESC}",
-  toc: ${TOC_VAL},
-  number-sections: ${NUMBER_SECTIONS_VAL},
-)
+data_dir=
+if [ -n "${MD2PDF_DATA_DIR+x}" ]; then
+  [ -n "$MD2PDF_DATA_DIR" ] || fail 4 "MD2PDF_DATA_DIR is empty"
+  data_dir=$MD2PDF_DATA_DIR
+else
+  for data_candidate in \
+    "$script_dir/share/md2pdf" \
+    "$script_dir/../share/md2pdf" \
+    "${XDG_DATA_HOME:-${HOME:-}/.local/share}/md2pdf"
+  do
+    if [ -f "$data_candidate/filters/runtime.lua" ] && \
+       [ -f "$data_candidate/typst/template.typ" ]; then
+      data_dir=$data_candidate
+      break
+    fi
+  done
+fi
 
-TYPSTEOF
+[ -n "$data_dir" ] || fail 4 "cannot locate the md2pdf data directory"
+data_dir=$(canonical_path "$data_dir") || fail 4 "cannot resolve data directory: $data_dir"
 
-# ── Convertir Markdown → Typst (omitiendo el frontmatter YAML) ────────────
-pandoc "$INPUT_PATH" \
-  --from "markdown+yaml_metadata_block-raw_attribute" \
-  --to typst \
-  --lua-filter "${TEMPLATE_DIR}/tables.lua" \
-  --wrap=none \
-  --strip-comments \
-  >> "$TMP_TYP"
+for runtime_file in \
+  filters/runtime.lua \
+  typst/template.typ \
+  typst/document.typ \
+  typst/theme.typ \
+  typst/page.typ \
+  typst/profiles/general.typ
+do
+  [ -r "$data_dir/$runtime_file" ] || \
+    fail 4 "required runtime file is missing: $runtime_file"
+done
 
-# ── Crear directorio de salida si no existe ───────────────────────────────
-mkdir -p "$(dirname "$OUTPUT")"
+for dependency in pandoc typst; do
+  command -v "$dependency" >/dev/null 2>&1 || \
+    fail 5 "required dependency not found: $dependency"
+done
 
-# ── Compilar ──────────────────────────────────────────────────────────────
-typst compile --root "$INPUT_DIR" "$TMP_TYP" "$OUTPUT"
+umask 077
+stage_dir=$(mktemp -d "${TMPDIR:-/tmp}/md2pdf.XXXXXXXX") || \
+  fail 4 "cannot create a staging directory"
+trap cleanup 0
+trap 'signal_exit 129' HUP
+trap 'signal_exit 130' INT
+trap 'signal_exit 143' TERM
 
-echo "✅ PDF generado: $OUTPUT"
+mkdir -p "$stage_dir/runtime/profiles" "$stage_dir/assets" || \
+  fail 4 "cannot prepare the staging directory"
+for runtime_file in template.typ document.typ theme.typ page.typ; do
+  cp "$data_dir/typst/$runtime_file" "$stage_dir/runtime/$runtime_file" || \
+    fail 4 "cannot stage runtime file: typst/$runtime_file"
+done
+cp "$data_dir/typst/profiles/general.typ" "$stage_dir/runtime/profiles/general.typ" || \
+  fail 4 "cannot stage runtime file: typst/profiles/general.typ"
+
+filter_error=$stage_dir/filter-error.txt
+pandoc_error=$stage_dir/pandoc-error.txt
+if ! MD2PDF_STAGE_DIR=$stage_dir \
+     MD2PDF_SOURCE_DIR=$input_dir \
+     MD2PDF_CLI_PROFILE=$cli_profile \
+     MD2PDF_FILTER_ERROR=$filter_error \
+     pandoc "$input_path" \
+       --from=markdown+yaml_metadata_block-raw_attribute-raw_html-raw_tex \
+       --to=typst \
+       --standalone \
+       --template="$stage_dir/runtime/template.typ" \
+       --lua-filter="$data_dir/filters/runtime.lua" \
+       --resource-path="$input_dir" \
+       --wrap=none \
+       --strip-comments \
+       > "$stage_dir/document.typ" 2> "$pandoc_error"
+then
+  if [ -s "$filter_error" ]; then
+    IFS= read -r filter_message < "$filter_error"
+    fail 4 "$filter_message"
+  fi
+  show_tool_error "Pandoc conversion failed" "$pandoc_error"
+  exit 6
+fi
+
+typst_error=$stage_dir/typst-error.txt
+if ! (CDPATH= cd "$stage_dir" && \
+      typst compile --root "$stage_dir" document.typ output.pdf) \
+      > "$stage_dir/typst-output.txt" 2> "$typst_error"
+then
+  show_tool_error "Typst compilation failed" "$typst_error"
+  exit 6
+fi
+
+publish_tmp=$(mktemp "$output_dir/.md2pdf.XXXXXXXX.pdf") || \
+  fail 7 "cannot create an atomic publication file in: $output_dir"
+if ! cp "$stage_dir/output.pdf" "$publish_tmp"; then
+  fail 7 "cannot copy the completed PDF into: $output_dir"
+fi
+chmod 644 "$publish_tmp" || fail 7 "cannot set final PDF permissions"
+if ! mv -f "$publish_tmp" "$output_path"; then
+  fail 7 "cannot publish the completed PDF: $output_path"
+fi
+publish_tmp=
+
+printf 'PDF written to %s\n' "$output_path"
