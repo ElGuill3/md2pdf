@@ -165,8 +165,9 @@ assert_contains "rendering stage is reported on stderr" \
   "Rendering PDF..." "$progress_stderr"
 assert_contains "publication stage is reported on stderr" \
   "Publishing PDF..." "$progress_stderr"
+progress_output_path=$(CDPATH= cd -P "$OUTPUT" && pwd -P)/progress.pdf
 assert_contains "default success remains on stdout" \
-  "PDF written to $OUTPUT/progress.pdf" "$progress_stdout"
+  "PDF written to $progress_output_path" "$progress_stdout"
 assert_not_contains "progress does not contaminate stdout" \
   "Converting Markdown..." "$progress_stdout"
 assert_not_contains "success does not move to stderr" \
