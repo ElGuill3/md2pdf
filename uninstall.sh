@@ -3,7 +3,7 @@
 set -u
 
 PROGRAM=md2pdf-uninstall
-VERSION=0.1.0
+VERSION=0.2.0
 PREFIX=
 DRY_RUN=false
 
@@ -78,9 +78,19 @@ launcher_matches() {
   found_signature=false
   while IFS= read -r line || [ -n "$line" ]; do
     case $line in
-      'PROGRAM=md2pdf') found_program=true ;;
-      'VERSION=0.1.0') found_version=true ;;
-      "INSTALL_SIGNATURE='md2pdf-public-launcher-0.1.0'") found_signature=true ;;
+      PROGRAM=*)
+        [ "$line" = 'PROGRAM=md2pdf' ] && [ "$found_program" = false ] || return 1
+        found_program=true
+        ;;
+      VERSION=*)
+        [ "$line" = 'VERSION=0.2.0' ] && [ "$found_version" = false ] || return 1
+        found_version=true
+        ;;
+      INSTALL_SIGNATURE=*)
+        [ "$line" = "INSTALL_SIGNATURE='md2pdf-public-launcher-0.2.0'" ] &&
+          [ "$found_signature" = false ] || return 1
+        found_signature=true
+        ;;
     esac
   done < "$launcher"
   [ "$found_program" = true ] && [ "$found_version" = true ] &&

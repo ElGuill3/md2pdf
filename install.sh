@@ -4,7 +4,7 @@ set -u
 umask 077
 
 PROGRAM=md2pdf-install
-VERSION=0.1.0
+VERSION=0.2.0
 PREFIX=
 DRY_RUN=false
 data_stage=
@@ -16,6 +16,7 @@ bin_published=false
 target_lock=
 transaction_marker=.md2pdf-transaction.$$
 transaction_token="md2pdf-install $$"
+managed_version=
 
 print_help() {
   cat <<'EOF'
@@ -134,23 +135,43 @@ marker_matches() {
     IFS= read -r marker_bin || return 1
     IFS= read -r marker_data || return 1
     if IFS= read -r marker_extra; then return 1; fi
-    [ "$marker_version" = "md2pdf-install $VERSION" ] &&
-      [ "$marker_bin" = "bin=$bin_file" ] &&
-      [ "$marker_data" = "data=$data_dir" ]
+    case $marker_version in
+      "md2pdf-install $VERSION") marker_managed_version=$VERSION ;;
+      'md2pdf-install 0.1.0') marker_managed_version=0.1.0 ;;
+      *) return 1 ;;
+    esac
+    [ "$marker_bin" = "bin=$bin_file" ] &&
+      [ "$marker_data" = "data=$data_dir" ] || return 1
+    managed_version=$marker_managed_version
   } < "$marker"
 }
 
 launcher_matches() {
   launcher=$1
+  expected_version=$2
   [ -f "$launcher" ] && [ ! -L "$launcher" ] || return 1
+  case $expected_version in
+    "$VERSION") expected_signature="INSTALL_SIGNATURE='md2pdf-public-launcher-$VERSION'" ;;
+    0.1.0) expected_signature="INSTALL_SIGNATURE='md2pdf-public-launcher-0.1.0'" ;;
+    *) return 1 ;;
+  esac
   found_program=false
   found_version=false
   found_signature=false
   while IFS= read -r line || [ -n "$line" ]; do
     case $line in
-      'PROGRAM=md2pdf') found_program=true ;;
-      'VERSION=0.1.0') found_version=true ;;
-      "INSTALL_SIGNATURE='md2pdf-public-launcher-0.1.0'") found_signature=true ;;
+      PROGRAM=*)
+        [ "$line" = 'PROGRAM=md2pdf' ] && [ "$found_program" = false ] || return 1
+        found_program=true
+        ;;
+      VERSION=*)
+        [ "$line" = "VERSION=$expected_version" ] && [ "$found_version" = false ] || return 1
+        found_version=true
+        ;;
+      INSTALL_SIGNATURE=*)
+        [ "$line" = "$expected_signature" ] && [ "$found_signature" = false ] || return 1
+        found_signature=true
+        ;;
     esac
   done < "$launcher"
   [ "$found_program" = true ] && [ "$found_version" = true ] &&
@@ -251,10 +272,10 @@ if [ -e "$data_dir" ]; then
 fi
 [ ! -L "$bin_file" ] || fail "launcher destination must not be a symbolic link: $bin_file"
 if [ -e "$bin_file" ] || [ -L "$bin_file" ]; then
-  launcher_matches "$bin_file" ||
-    fail "refusing to replace an unmanaged launcher: $bin_file"
   [ -e "$data_dir" ] ||
     fail "refusing to replace a launcher without its managed runtime: $bin_file"
+  launcher_matches "$bin_file" "$managed_version" ||
+    fail "refusing to replace an unmanaged launcher: $bin_file"
 fi
 for managed_path in filters typst typst/profiles $runtime_files uninstall.sh; do
   [ ! -L "$data_dir/$managed_path" ] ||

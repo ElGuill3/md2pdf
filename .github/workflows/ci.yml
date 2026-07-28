@@ -46,15 +46,20 @@ jobs:
 
       - name: Verify shell syntax and source modes
         run: |
-          sh -n md2pdf install.sh uninstall.sh tests/run.sh
+          sh -n md2pdf install.sh uninstall.sh install-skill.sh tests/run.sh tests/skill-installer.sh
           sh -n tests/fixtures/bsd-stat tests/fixtures/mock-curl tests/fixtures/typst-proxy
           test -x md2pdf
           test -x install.sh
           test -x uninstall.sh
+          test -x install-skill.sh
           test -x tests/run.sh
+          test -x tests/skill-installer.sh
           test ! -x tests/fixtures/bsd-stat
           test ! -x tests/fixtures/mock-curl
           test ! -x tests/fixtures/typst-proxy
 
       - name: Run real PDF suite
         run: ./tests/run.sh
+
+      - name: Run skill installer suite
+        run: ./tests/skill-installer.sh
