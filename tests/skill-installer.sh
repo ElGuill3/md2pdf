@@ -19,14 +19,31 @@ pass() {
 
 fake_bin=$TMP_ROOT/bin
 test_home=$TMP_ROOT/home
+codex_home=$test_home/.codex
+xdg_config_home=$test_home/.config
+claude_config_dir=$test_home/.claude
+gemini_cli_home=$test_home/.gemini
 mkdir -p "$fake_bin" "$test_home"
 for agent in codex opencode claude gemini; do
   printf '#!/bin/sh\nexit 0\n' > "$fake_bin/$agent"
   chmod 755 "$fake_bin/$agent"
 done
 
-env HOME="$test_home" PATH="$fake_bin:/usr/bin:/bin" \
-  "$ROOT/install-skill.sh" --all-detected >/dev/null || fail "all-detected installation succeeds"
+for agent_root in "$codex_home" "$xdg_config_home" "$claude_config_dir" "$gemini_cli_home"; do
+  case $agent_root in
+    "$TMP_ROOT"/*) ;;
+    *) fail "agent root is confined to the temporary root: $agent_root" ;;
+  esac
+done
+
+run_all_detected() {
+  env HOME="$test_home" PATH="$fake_bin:/usr/bin:/bin" \
+    CODEX_HOME="$codex_home" XDG_CONFIG_HOME="$xdg_config_home" \
+    CLAUDE_CONFIG_DIR="$claude_config_dir" GEMINI_CLI_HOME="$gemini_cli_home" \
+    "$ROOT/install-skill.sh" --all-detected
+}
+
+run_all_detected >/dev/null || fail "all-detected installation succeeds"
 pass "all-detected installation succeeds"
 
 canonical_skill=$ROOT/skills/md2pdf
@@ -35,10 +52,10 @@ find "$canonical_skill" -type f -print > "$payload_list" || fail "canonical payl
 [ -s "$payload_list" ] || fail "canonical payload is not empty"
 
 for destination in \
-  "$test_home/.codex/skills/md2pdf" \
-  "$test_home/.config/opencode/skills/md2pdf" \
-  "$test_home/.claude/skills/md2pdf" \
-  "$test_home/.gemini/skills/md2pdf"
+  "$codex_home/skills/md2pdf" \
+  "$xdg_config_home/opencode/skills/md2pdf" \
+  "$claude_config_dir/skills/md2pdf" \
+  "$gemini_cli_home/skills/md2pdf"
 do
   [ -L "$destination" ] || fail "destination is a symlink: $destination"
   [ "$(readlink "$destination")" = "$canonical_skill" ] || fail "destination targets canonical skill: $destination"
@@ -50,8 +67,7 @@ do
 done
 pass "all four destinations match every canonical skill payload file"
 
-env HOME="$test_home" PATH="$fake_bin:/usr/bin:/bin" \
-  "$ROOT/install-skill.sh" --all-detected >/dev/null || fail "reinstallation is idempotent"
+run_all_detected >/dev/null || fail "reinstallation is idempotent"
 pass "reinstallation is idempotent"
 
 collision_home=$TMP_ROOT/collision-home
