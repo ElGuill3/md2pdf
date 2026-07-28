@@ -1,0 +1,12 @@
+---
+title: "<document title>"
+lang: en-US
+md2pdf:
+  profile: general
+  cover: true
+  toc:
+    enabled: true
+    depth: 3
+  footer:
+    numbering: true
+---

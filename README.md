@@ -18,6 +18,10 @@ The installer writes only to user-controlled paths, never uses `sudo`, and does
 not install Pandoc, Typst, curl, or fonts. See [Installation](#installation) for
 custom prefixes and uninstall instructions.
 
+Agents can also prepare Markdown and invoke the converter through the reusable
+[md2pdf agent skill](docs/agent-skill.md). Its separate installer supports Codex,
+OpenCode, Claude Code, and Gemini CLI when those agents are present.
+
 ## First Conversion
 
 ```sh
