@@ -1,10 +1,10 @@
 # Apply Progress: Refine Cover and Page Layout
 
 - **Mode:** Strict TDD; authoritative real-PDF GREEN reached with the temporary official Pandoc 3.8 provision.
-- **Delivery:** PR 2, work unit `pr2-flow-furniture`, stacked-to-main, targets updated `main` after PR 1.
-- **Task state:** 8/10 complete: 1.1–1.3, 2.1–2.4, and 3.1. Only PR 3 tasks 3.2 and 3.3 remain pending.
+- **Delivery:** PR 3, work unit `pr3-docs-evidence`, stacked-to-main, targets updated `main` after PR 2.
+- **Task state:** 10/10 complete: 1.1–1.3, 2.1–2.4, and 3.1–3.3.
 - **Cumulative history:** the prior apply attempt stopped at dependency preflight with exit 99 because Pandoc was unavailable; this continuation ran the same candidate through Pandoc → Typst → PDF and preserved the prior blocked evidence.
-- **Implemented candidate:** PR 1 cover/provenance behavior plus contextual current/latest-earlier chapter headers, title-fallback headers, left page numbers, right document/explicit footer titles, preserved controls, and breakable profile-aware level-one bands.
+- **Implemented candidate:** PR 1 cover/provenance, PR 2 flow/furniture, and PR 3 configuration guidance plus final four-profile verification evidence.
 
 ## TDD Cycle Evidence
 
@@ -18,8 +18,8 @@
 | 1.3 | `tests/run.sh` / real-PDF integration | 519/519 passed before PR 2 edits | Exact full command after RED tests: exit 1; 537 passed, 16 expected failures, 553 total | Exact full command: exit 0; 553/553 | Four profiles, current/latest-earlier/title-fallback headers, default/explicit/disabled furniture, numbering on/off, flow boundaries, bbox zones, rasters, and pairwise profile inequality | Corrected the right-aligned long-title assertion to observe its rightmost supplied word rather than requiring its first word to start in the right half |
 | 2.3 | `share/md2pdf/typst/page.typ` / real-PDF integration | 519/519 passed before production edits | Task 1.3 failures proved old document-title headers and reversed author/date-left, number-right footers | 553/553; current-page then latest-earlier level-one lookup and title fallback pass | Current page, continued chapter page, no-heading fallback, explicit header/footer, disabled furniture, numbering disabled | Removed the redundant one-line default-header helper; kept query logic local to running furniture |
 | 2.4 | `share/md2pdf/typst/theme.typ` / real-PDF geometry+raster | 519/519 passed before production edits | General profile band inset failed before production edits; cross-profile flow/raster checks were present | 553/553; all four profile band geometry and flow assertions pass | Profile-specific inset thresholds, same-page multiple headings, boundary heading/content, and six pairwise body-raster inequalities | All four branches use the existing local block pattern with `breakable: true`; no helper, forced break, fixed height, clipping, or ellipsis |
-| 3.2 | `docs/configuration.md` / documentation | N/A — PR 3 task | N/A — not assigned to PR 1 | Pending | Pending | Pending |
-| 3.3 | `tests/run.sh`, `tests/skill-installer.sh` / integration | N/A — PR 3 task | N/A — not assigned to PR 1 | Pending | Pending | Pending |
+| 3.2 | `docs/configuration.md` / documentation | Existing schema/default documentation reviewed against `runtime.lua` and `page.typ` | N/A — documentation-only task; no production behavior changed | Focused documentation contract assertions passed | Sparse/title-provenance, Academic dedicated-cover, default furniture, and override sections checked against implementation | Kept the change within the existing metadata, profile-default, and furniture structure; no duplicate schema reference added |
+| 3.3 | existing integration, semantic, bbox, and raster harnesses | PR 2 candidate passed 553/553 before this documentation-only slice | RDD correction added observable disabled-furniture assertions without production changes | Required combined suite passed 568/568; shell syntax and whitespace checks exited 0 | Fresh four-profile PDFs plus enabled negative controls passed 16/16 focused checks | Inspected every fresh cover/body pair; correction changed only tests and evidence |
 
 ### PR 2 Test Summary
 
@@ -58,6 +58,14 @@
 | PR 2 runtime harness | `PATH="/tmp/opencode/pandoc-3.8/pandoc-3.8/bin:$PATH" /tmp/opencode/md2pdf-pr2-flow-furniture-focused.sh /home/guill3/md2pdf` → exit 0; 30 semantic, bbox, raster, continuation, override, and profile-inequality checks passed. |
 | PR 2 visual inspection | Inspected `/tmp/opencode/md2pdf-pr2-evidence/{general,technical,report,academic}-body.png`; all four showed distinct readable level-one bands, chapter context at top, page number left, and the multilingual document title right without clipping. |
 | PR 2 rollback boundary | Revert only the PR 2 hunks in `share/md2pdf/typst/page.typ`, `share/md2pdf/typst/theme.typ`, and `tests/run.sh`; PR 1 cover/provenance behavior remains intact. |
+| PR 3 documentation focused check | `sh -eu -c` with fixed `grep -F` assertions for `Cover metadata is sparse`, omitted and explicit `title: Document`, Academic dedicated covers, current/title-fallback headers, left page numbers, and existing overrides against `docs/configuration.md` → exit 0; 8/8 assertions passed. |
+| PR 3 documentation runtime harness | N/A — task 3.2 changes documentation only and introduces no runtime boundary; task 3.3 reruns the existing real-PDF harness. |
+| PR 3 rollback boundary | Revert `docs/configuration.md`, `verify-report.md`, and the PR 3 evidence additions in this apply-progress artifact; PR 1 and PR 2 runtime behavior remains intact. |
+| PR 3 full verification | Full suite → 557/557 integration and 7/7 installer checks; disabled-furniture focus → 16/16 using script `sha256:0874f82308a4de08c05a40cd63430dc5179f2d98c40264c013fa85e6366f7e1b` and evidence `sha256:3caa2d8180824761388cade89cf75d906e19d9c20b23bfdb1f750e514e4ec8d9`. |
+| PR 3 static verification | `sh -n md2pdf install.sh uninstall.sh install-skill.sh tests/run.sh tests/skill-installer.sh && git diff --check` → exit 0. |
+| PR 3 focused PDF evidence | Fresh `./md2pdf --profile "$profile" tests/fixtures/profile-reference.md` renders for General, Technical, Report, and Academic, followed by page-scoped `pdftotext`, `pdftotext -bbox`, and `pdftoppm`; `sh /tmp/md2pdf-pr3-evidence/check.sh` (SHA-256 `0aefe9a06477a0ddeb345fdd9b152baa76bb3c84ad7e335dc96c6da1856a18a7`) → exit 0; 12/12 semantic assertions, 8/8 contained bbox documents, and 8/8 distinct raster hashes. |
+| PR 3 visual inspection | Inspected `/tmp/md2pdf-pr3-evidence/contact-sheet.png`: General, Technical, and Report pages 1/3 plus Academic pages 1/2. All covers retained readable multilingual metadata, distinct bounded signatures, whitespace, and no furniture; all body pages had readable distinct bands, contextual headers, left page numbers, and right document titles without clipping or overlap. |
+| PR 3 work-unit rollback boundary | Revert only `docs/configuration.md`, `tests/run.sh`, `openspec/changes/refine-cover-and-page-layout/tasks.md`, `apply-progress.md`, and `verify-report.md`; runtime behavior from PR 1 and PR 2 remains unchanged. |
 
 ## Deviations and Issues
 
@@ -66,8 +74,7 @@
 
 ## Remaining Tasks
 
-- [ ] 3.2 Update configuration documentation in PR 3.
-- [ ] 3.3 Complete the PR 3 verification/evidence pass.
+None — all 10 implementation tasks are complete and ready for SDD verification.
 
 ## Evidence Recapture
 

@@ -20,10 +20,10 @@ top-level `profile` alias, then `general`. Do not set both YAML profile forms.
 
 | Key | Type | Effect |
 |---|---|---|
-| `title` | String | PDF title and cover title; default `Document` |
+| `title` | String | PDF title, running-furniture fallback, and optional cover title |
 | `subtitle` | String | Optional cover subtitle |
 | `author` or `authors` | Author or list | Author names, affiliations, and email metadata |
-| `date` | String | Optional cover and report furniture date |
+| `date` | String | Optional cover date |
 | `lang` | BCP-47-like tag | Hyphenation language and English/Spanish labels |
 
 An author can be a string or a mapping:
@@ -40,6 +40,12 @@ author:
 
 `affiliation` accepts a string or list of strings. `email` is a string and is
 written to PDF keywords as `author-email:<address>`; it is not silently dropped.
+
+Cover metadata is sparse: only supplied, non-empty title, subtitle, author,
+affiliation, and date values are shown. If `title` is omitted, md2pdf still uses
+`Document` for PDF metadata and running-furniture fallback, but does not print
+that normalized value on the cover. An explicitly supplied `title: Document`
+is printed like any other title.
 
 ## Layout Schema
 
@@ -97,6 +103,22 @@ compatibility. Prefer the namespaced schema for new documents.
 | `academic` | Yes | No | Yes | Restrained margins and numbered equations |
 
 Any explicit layout value is applied after these defaults.
+
+Every enabled cover, including `academic`, occupies a dedicated page using the
+configured paper and orientation. Cover pages suppress the header, footer, and
+page number; body furniture begins on the following page.
+
+## Running Furniture
+
+With the default empty `header.text`, each body-page header shows the current
+level-one heading. It continues the latest earlier level-one heading on later
+pages and falls back to the document title before any level-one heading exists.
+
+Enabled footers place the page number on the left and the document title on the
+right. Set `footer.text` to replace the right-hand title. Existing overrides
+remain authoritative: explicit header/footer text is preserved,
+`header.enabled` and `footer.enabled` suppress their regions, and
+`footer.numbering` controls only the page number.
 
 ## Citations
 
