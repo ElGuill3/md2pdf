@@ -3,6 +3,86 @@
   normalized == "es" or normalized.starts-with("es-")
 }
 
+#let cover-options(theme) = {
+  let style = theme.cover-style
+  let technical = style == "technical"
+  let report = style == "report"
+  let academic = style == "academic"
+  let title-size = if technical { 25pt } else if report { 30pt } else if academic { 21pt } else { 29pt }
+  (
+    position: if technical { "left" } else if report { "right" } else { "center" },
+    signature-width: if technical { 0.78 } else if report { 0.86 } else if academic { 0.7 } else { 0.84 },
+    signature-cap: if technical { 21pt } else if report { 31pt } else if academic { 20pt } else { 26pt },
+    grid-stroke: if report { 0.7pt + theme.colors.accent } else if academic { 0.45pt + theme.colors.accent-light } else { 0.55pt + theme.colors.accent-light },
+    curve-stroke: if technical { 1.25pt + theme.colors.accent-gold } else if report { 1.5pt + theme.colors.accent-gold } else if academic { 1pt + theme.colors.accent } else { 1.25pt + theme.colors.accent-gold },
+    normal-width: if technical { 0.72 } else if academic { 0.68 } else { 0.7 },
+    wide-width: if technical { 0.84 } else { 0.82 },
+    compact-width: if report { 0.94 } else if academic { 0.95 } else { 0.94 },
+    normal-limit: 2.6 * title-size,
+    wide-limit: 3.7 * title-size,
+    top-spacing: if technical { 0.35cm } else if report { 0.5cm } else if academic { 0.25cm } else { 0.45cm },
+    metadata-spacing: if technical { 0.65cm } else if report { 0.8cm } else if academic { 0.55cm } else { 0.8cm },
+    title-size: title-size,
+    subtitle-size: if technical { 12pt } else if report { 14pt } else if academic { 11pt } else { 13pt },
+  )
+}
+
+#let cover-signature(options) = layout(size => {
+  let unit = calc.min(size.width * options.signature-width / 8, size.height * 0.28 / 5, options.signature-cap)
+  let width = 8 * unit
+  let height = 5 * unit
+  let geometry = box(width: width, height: height, {
+    place(dx: 0pt, dy: 0pt, rect(width: width, height: height, fill: none, stroke: options.grid-stroke))
+    place(dx: 0pt, dy: 0pt, rect(width: 5 * unit, height: 5 * unit, fill: none, stroke: options.grid-stroke))
+    place(dx: 5 * unit, dy: 0pt, rect(width: 3 * unit, height: 3 * unit, fill: none, stroke: options.grid-stroke))
+    place(dx: 5 * unit, dy: 3 * unit, rect(width: 2 * unit, height: 2 * unit, fill: none, stroke: options.grid-stroke))
+    place(dx: 0pt, dy: 0pt, curve(
+      fill: none,
+      stroke: options.curve-stroke,
+      curve.move((0.35 * unit, 4.65 * unit)),
+      curve.cubic(none, (3.8 * unit, 4.65 * unit), (5 * unit, 3.2 * unit)),
+      curve.cubic((5 * unit, 1.5 * unit), none, (6.45 * unit, 1.5 * unit)),
+      curve.cubic((7.7 * unit, 1.5 * unit), (7.7 * unit, 3.9 * unit), (6.45 * unit, 4.55 * unit)),
+      curve.cubic((5.4 * unit, 4.85 * unit), (3.5 * unit, 4.9 * unit), (3.4 * unit, 3.65 * unit)),
+    ))
+  })
+  if options.position == "left" { align(left, geometry) } else if options.position == "right" { align(right, geometry) } else { align(center, geometry) }
+})
+
+#let cover-metadata(config, theme, title-supplied, options) = layout(size => {
+  let present = title-supplied and config.title != ""
+  let title = text(size: options.title-size, weight: "bold", fill: theme.colors.accent, config.title)
+  let normal = size.width * options.normal-width
+  let wide = size.width * options.wide-width
+  let compact = size.width * options.compact-width
+  let normal-height = if present { measure(title, width: normal).height } else { 0pt }
+  let wide-height = if present { measure(title, width: wide).height } else { 0pt }
+  let width = if not present or normal-height <= options.normal-limit { normal } else if wide-height <= options.wide-limit { wide } else { compact }
+  let metadata = block(width: width, breakable: false, {
+    if present { title }
+    if config.subtitle != "" {
+      v(0.4em)
+      text(size: options.subtitle-size, fill: theme.colors.gray-mid, style: "italic", config.subtitle)
+    }
+    if config.authors.len() > 0 {
+      v(0.85em)
+      for author in config.authors {
+        text(size: theme.text-size, author.name)
+        if author.affiliation != "" {
+          linebreak()
+          text(size: theme.text-size - 2pt, fill: theme.colors.gray-mid, author.affiliation)
+        }
+        linebreak()
+      }
+    }
+    if config.date != "" {
+      v(0.55em)
+      text(size: theme.text-size - 1pt, fill: theme.colors.gray-mid, config.date)
+    }
+  })
+  if options.position == "left" { align(left, metadata) } else if options.position == "right" { align(right, metadata) } else { align(center, metadata) }
+})
+
 #let default-header(config) = config.title
 
 #let default-footer(config, theme) = {
@@ -55,106 +135,19 @@
   }
 }
 
-#let cover-page(config, theme) = {
+#let cover-page(config, theme, title-supplied: false) = {
+  let options = cover-options(theme)
   if theme.cover-style == "technical" {
     rect(width: 100%, height: 10pt, fill: theme.colors.accent)
-    v(1.15cm)
-    text(size: 25pt, weight: "bold", fill: theme.colors.accent, config.title)
-    if config.subtitle != "" {
-      v(0.4em)
-      text(size: 12pt, fill: theme.colors.accent-light, config.subtitle)
-    }
-    v(1.5cm)
-    line(length: 100%, stroke: 1pt + theme.colors.accent-gold)
-    v(0.8em)
-    for author in config.authors {
-      text(size: 10pt, author.name)
-      if author.affiliation != "" { text(size: 8pt, fill: theme.colors.gray-mid, " · " + author.affiliation) }
-      linebreak()
-    }
-    v(1fr)
-    if config.date != "" { text(size: 9pt, fill: theme.colors.gray-mid, config.date) }
   } else if theme.cover-style == "report" {
     rect(width: 34%, height: 8pt, fill: theme.colors.accent-gold)
-    v(1.7cm)
-    text(size: 30pt, weight: "bold", fill: theme.colors.accent, config.title)
-    if config.subtitle != "" {
-      v(0.5em)
-      text(size: 14pt, fill: theme.colors.gray-mid, config.subtitle)
-    }
-    v(2cm)
-    grid(
-      columns: (4pt, 1fr),
-      gutter: 12pt,
-      rect(width: 4pt, height: 3cm, fill: theme.colors.accent-gold),
-      {
-        for author in config.authors {
-          text(size: 11pt, weight: "bold", fill: theme.colors.accent, author.name)
-          if author.affiliation != "" {
-            linebreak()
-            text(size: 9pt, fill: theme.colors.gray-mid, author.affiliation)
-          }
-          linebreak()
-        }
-      },
-    )
-    v(1fr)
-    line(length: 100%, stroke: 0.75pt + theme.colors.gray-light)
-    v(0.5em)
-    if config.date != "" { text(size: 10pt, fill: theme.colors.gray-mid, config.date) }
-  } else if theme.cover-style == "academic" {
-    align(center)[
-      #v(0.85cm)
-      #text(size: 19pt, weight: "bold", fill: theme.colors.accent, config.title)
-      #if config.subtitle != "" {
-        v(0.35em)
-        text(size: 11pt, style: "italic", fill: theme.colors.gray-mid, config.subtitle)
-      }
-      #v(0.8em)
-      #for author in config.authors {
-        text(size: 10pt, author.name)
-        if author.affiliation != "" { text(size: 8.5pt, fill: theme.colors.gray-mid, " · " + author.affiliation) }
-        linebreak()
-      }
-      #if config.date != "" { text(size: 9pt, fill: theme.colors.gray-mid, config.date) }
-      #v(0.6em)
-      #line(length: 35%, stroke: 0.75pt + theme.colors.accent-gold)
-    ]
-    v(1em)
-  } else {
-    align(center)[
-      #v(3cm)
-      #text(size: 28pt, weight: "bold", fill: theme.colors.accent, config.title)
-      #v(0.4em)
-      #grid(
-        columns: (1fr, 12pt, 1fr),
-        gutter: 0pt,
-        align(horizon, line(length: 100%, stroke: gradient.linear(rgb("#1a3c6e00"), theme.colors.accent))),
-        align(horizon, circle(radius: 4pt, fill: theme.colors.accent-gold)),
-        align(horizon, line(length: 100%, stroke: gradient.linear(theme.colors.accent, rgb("#1a3c6e00")))),
-      )
-      #v(0.4em)
-      #if config.subtitle != "" {
-        text(size: 14pt, fill: rgb("#555555"), style: "italic", config.subtitle)
-        v(0.5em)
-      }
-      #v(2cm)
-      #for author in config.authors {
-        text(size: 12pt, fill: rgb("#555555"), author.name)
-        if author.affiliation != "" {
-          linebreak()
-          text(size: 9pt, fill: theme.colors.gray-mid, author.affiliation)
-        }
-        linebreak()
-      }
-      #if config.date != "" {
-        v(0.3em)
-        text(size: 11pt, fill: theme.colors.gray-mid, config.date)
-      }
-      #v(1fr)
-    ]
   }
-  if theme.cover-style != "academic" { pagebreak() }
+  v(options.top-spacing)
+  cover-signature(options)
+  v(options.metadata-spacing)
+  cover-metadata(config, theme, title-supplied, options)
+  v(1fr)
+  pagebreak()
 }
 
 #let contents-page(config, theme) = {
@@ -171,7 +164,7 @@
   pagebreak()
 }
 
-#let page-layout(config, theme, body) = {
+#let page-layout(config, theme, body, title-supplied: false) = {
   let typst-lang = config.lang.split("-").first()
   let paper-name = (
     a3: "a3",
@@ -198,7 +191,7 @@
   )
 
   if config.cover {
-    cover-page(config, theme)
+    cover-page(config, theme, title-supplied: title-supplied)
   }
   if config.toc.enabled {
     contents-page(config, theme)

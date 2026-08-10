@@ -343,6 +343,8 @@ for profile in general technical report academic; do
     "$profile_pdf" "$profile_last_page_text"
   assert_contains "$profile cover retains its title" \
     "Profile Reference" "$profile_text"
+  assert_contains "$profile cover retains multilingual title content" \
+    "中文排版测试" "$profile_text"
   assert_contains "$profile cover retains its subtitle" \
     "One source, four document systems" "$profile_text"
   assert_contains "$profile output retains its author" \
@@ -366,7 +368,7 @@ for profile in general technical report academic; do
   run_status "$profile cover page rasterizes" 0 \
     pdftoppm -f 1 -singlefile -png -r 72 "$profile_pdf" "$TMP_ROOT/profile-$profile-cover"
   case $profile in
-    academic) profile_body_page=1 ;;
+    academic) profile_body_page=2 ;;
     *) profile_body_page=3 ;;
   esac
   run_status "$profile body page rasterizes" 0 \
@@ -392,6 +394,78 @@ for profile in general technical report academic; do
       assert_contains "Academic numbers equations by default" "(1)" "$profile_text"
       ;;
   esac
+done
+
+awk '$1 != "title:" { print }' "$SOURCE/profile-reference.md" \
+  > "$SOURCE/profile-reference-omitted-title.md"
+awk '$1 == "title:" { print "title: Document"; next } { print }' \
+  "$SOURCE/profile-reference.md" > "$SOURCE/profile-reference-explicit-document.md"
+
+for title_case in omitted-title explicit-document; do
+  title_fixture=$SOURCE/profile-reference-$title_case.md
+  for profile in general technical report academic; do
+    title_pdf=$OUTPUT/profile-$title_case-$profile.pdf
+    title_text=$TMP_ROOT/profile-$title_case-$profile.txt
+    title_page=$TMP_ROOT/profile-$title_case-$profile-page-1.txt
+    run_status "$profile $title_case provenance conversion succeeds" 0 \
+      "$CLI" --profile "$profile" "$title_fixture" "$title_pdf"
+    pdfinfo "$title_pdf" > "$TMP_ROOT/profile-$title_case-$profile.info"
+    pdftotext "$title_pdf" "$title_text"
+    pdftotext -f 1 -l 1 "$title_pdf" "$title_page"
+    title_pages=$(awk '/^Pages:/ { print $2 }' \
+      "$TMP_ROOT/profile-$title_case-$profile.info")
+    if [ "$title_pages" -ge 2 ]; then
+      pass "$profile $title_case has a dedicated cover page"
+    else
+      fail "$profile $title_case has a dedicated cover page"
+    fi
+  assert_contains "$profile $title_case retains the long subtitle" \
+      "One source, four document systems" "$title_page"
+    assert_contains "$profile $title_case retains the body marker" \
+      "NORMAL_FLOW_MARKER" "$title_text"
+    assert_not_contains "$profile $title_case keeps body text off the cover" \
+      "NORMAL_FLOW_MARKER" "$title_page"
+    if [ "$title_case" = omitted-title ]; then
+      assert_not_contains "$profile omits the normalized title from the cover" \
+        "Document" "$title_page"
+    else
+      assert_contains "$profile preserves an explicit Document title" \
+        "Document" "$title_page"
+    fi
+  done
+done
+
+for profile in general technical report academic; do
+  sparse_pdf=$OUTPUT/cover-sparse-$profile.pdf
+  sparse_info=$TMP_ROOT/cover-sparse-$profile.info
+  sparse_text=$TMP_ROOT/cover-sparse-$profile.txt
+  sparse_page=$TMP_ROOT/cover-sparse-$profile-page-1.txt
+  run_status "$profile sparse configured cover conversion succeeds" 0 \
+    "$CLI" --profile "$profile" "$SOURCE/cover-sparse.md" "$sparse_pdf"
+  pdfinfo "$sparse_pdf" > "$sparse_info"
+  pdftotext "$sparse_pdf" "$sparse_text"
+  pdftotext -f 1 -l 1 "$sparse_pdf" "$sparse_page"
+  sparse_pages=$(awk '/^Pages:/ { print $2 }' "$sparse_info")
+  if [ "$sparse_pages" -ge 2 ]; then
+    pass "$profile sparse cover is a dedicated page"
+  else
+    fail "$profile sparse cover is a dedicated page"
+  fi
+  if awk '/^Page size:/ { exit !($3 > $5) }' "$sparse_info"; then
+    pass "$profile sparse cover honors configured landscape orientation"
+  else
+    fail "$profile sparse cover honors configured landscape orientation"
+  fi
+  assert_contains "$profile sparse cover retains its title" \
+    "Sparse Cover" "$sparse_page"
+  assert_not_contains "$profile sparse cover omits body content" \
+    "SPARSE_BODY_MARKER" "$sparse_page"
+  assert_not_contains "$profile sparse cover omits header furniture" \
+    "SPARSE_HEADER_SENTINEL" "$sparse_page"
+  assert_not_contains "$profile sparse cover omits footer furniture" \
+    "SPARSE_FOOTER_SENTINEL" "$sparse_page"
+  assert_contains "$profile sparse body retains its marker" \
+    "SPARSE_BODY_MARKER" "$sparse_text"
 done
 
 for profile_pair in \
@@ -459,7 +533,8 @@ run_status "complex typed YAML succeeds" 0 \
   "$CLI" "$SOURCE/complex.md" "$OUTPUT/complex.pdf"
 pdftotext "$OUTPUT/complex.pdf" "$TMP_ROOT/complex.txt"
 assert_contains "quoted title word survives" "Quoted" "$TMP_ROOT/complex.txt"
-assert_contains "title backslash survives" 'with a \ backslash' "$TMP_ROOT/complex.txt"
+assert_contains "title backslash survives" 'with a \' "$TMP_ROOT/complex.txt"
+assert_contains "title backslash word survives" "backslash" "$TMP_ROOT/complex.txt"
 assert_contains "structured author name survives" "Ada Lovelace" "$TMP_ROOT/complex.txt"
 assert_contains "structured affiliation list survives" \
   "Analytical Society; Computing Group" "$TMP_ROOT/complex.txt"

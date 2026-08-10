@@ -1,6 +1,6 @@
 ---
-title: Profile Reference
-subtitle: One source, four document systems
+title: Profile Reference — Diseño editorial para sistemas documentales 中文排版测试 Ελληνικά
+subtitle: One source, four document systems — a long multilingual metadata study for readable publication across configured page orientations
 author:
   - name: Ada Example
     affiliation: Systems Laboratory
@@ -61,3 +61,13 @@ $$
 The closing note remains visible in every profile.[^profile-note]
 
 [^profile-note]: Footnote treatment is profile-aware.
+
+# Normal Flow Marker
+
+NORMAL_FLOW_MARKER keeps a future heading-flow check stable without changing
+the document's meaning.
+
+# Boundary Flow Marker
+
+BOUNDARY_FLOW_MARKER keeps a future boundary-pagination check stable without
+changing the document's meaning.

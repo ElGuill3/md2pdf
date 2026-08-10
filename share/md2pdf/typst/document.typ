@@ -16,7 +16,7 @@
   table-code(profile-themes.at(config.profile), body, landscape: landscape)
 }
 
-#let md2pdf-document(config: (:), body) = {
+#let md2pdf-document(config: (:), body, title-supplied: false) = {
   let theme = profile-themes.at(config.profile)
   let author-names = config.authors.map(author => author.name)
   let author-emails = config.authors
@@ -33,5 +33,6 @@
     config,
     theme,
     apply-theme(config, theme, body),
+    title-supplied: title-supplied,
   )
 }
