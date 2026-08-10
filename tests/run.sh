@@ -371,6 +371,52 @@ for profile in general technical report academic; do
   fi
   run_status "$profile cover page rasterizes" 0 \
     pdftoppm -f 1 -singlefile -png -r 72 "$profile_pdf" "$TMP_ROOT/profile-$profile-cover"
+  profile_cover_svg=$TMP_ROOT/profile-$profile-cover.svg
+  profile_cover_bbox=$TMP_ROOT/profile-$profile-cover.html
+  run_status "$profile cover exports page-scale vector geometry" 0 \
+    pdftocairo -svg -f 1 -l 1 "$profile_pdf" "$profile_cover_svg"
+  if awk -F'"' '
+    $4 == "0.7" {
+      split($16, point, " ")
+      if (point[2] > 595.4 && point[2] < 595.8 && point[3] > 841) found=1
+    }
+    END { exit !found }
+  ' "$profile_cover_svg"; then
+    pass "$profile Fibonacci spiral uses the 0.05 percent page-width overscan"
+  else
+    fail "$profile Fibonacci spiral uses the 0.05 percent page-width overscan"
+  fi
+  if awk -F'"' '
+    $4 == "0.7" {
+      transform=$18
+      gsub(/[(), ]+/, " ", transform)
+      split(transform, matrix, " ")
+      if (matrix[6] < 0 && matrix[7] < 0) found=1
+    }
+    END { exit !found }
+  ' "$profile_cover_svg"; then
+    pass "$profile Fibonacci outer frame is clipped beyond the top and left edges"
+  else
+    fail "$profile Fibonacci outer frame is clipped beyond the top and left edges"
+  fi
+  if awk '
+    /<path fill="none" stroke-width=/ { count++ }
+    END { exit count != 7 }
+  ' "$profile_cover_svg"; then
+    pass "$profile cover contains only the page-scale Fibonacci geometry"
+  else
+    fail "$profile cover contains only the page-scale Fibonacci geometry"
+  fi
+  pdftotext -f 1 -l 1 -bbox "$profile_pdf" "$profile_cover_bbox"
+  if awk -F'"' '
+    /<page / { width=$2; height=$4 }
+    /<word / && ($2 < 0 || $4 < 0 || $6 > width || $8 > height) { overflow=1 }
+    END { exit overflow }
+  ' "$profile_cover_bbox"; then
+    pass "$profile cover metadata remains inside the page"
+  else
+    fail "$profile cover metadata remains inside the page"
+  fi
   case $profile in
     academic) profile_body_page=2 ;;
     *) profile_body_page=3 ;;

@@ -11,10 +11,7 @@
   let title-size = if technical { 25pt } else if report { 30pt } else if academic { 21pt } else { 29pt }
   (
     position: if technical { "left" } else if report { "right" } else { "center" },
-    signature-width: if technical { 0.78 } else if report { 0.86 } else if academic { 0.7 } else { 0.84 },
     signature-cap: if technical { 21pt } else if report { 31pt } else if academic { 20pt } else { 26pt },
-    grid-stroke: if report { 0.7pt + theme.colors.accent } else if academic { 0.45pt + theme.colors.accent-light } else { 0.55pt + theme.colors.accent-light },
-    curve-stroke: if technical { 1.25pt + theme.colors.accent-gold } else if report { 1.5pt + theme.colors.accent-gold } else if academic { 1pt + theme.colors.accent } else { 1.25pt + theme.colors.accent-gold },
     normal-width: if technical { 0.72 } else if academic { 0.68 } else { 0.7 },
     wide-width: if technical { 0.84 } else { 0.82 },
     compact-width: if report { 0.94 } else if academic { 0.95 } else { 0.94 },
@@ -27,26 +24,42 @@
   )
 }
 
-#let cover-signature(options) = layout(size => {
-  let unit = calc.min(size.width * options.signature-width / 8, size.height * 0.28 / 5, options.signature-cap)
+#let cover-background(config, theme) = layout(size => {
+  let top = config.page.margins.top * 1pt
+  let bottom = config.page.margins.bottom * 1pt
+  let left = config.page.margins.left * 1pt
+  let right = config.page.margins.right * 1pt
+  let page-width = size.width + left + right
+  let page-height = size.height + top + bottom
+  let unit = calc.max(page-width / 8, page-height / 13) * 1.0005
   let width = 8 * unit
-  let height = 5 * unit
+  let height = 13 * unit
+  let grid-stroke = 0.45pt + theme.colors.gray-light
+  let curve-stroke = 0.7pt + theme.colors.gray-light
   let geometry = box(width: width, height: height, {
-    place(dx: 0pt, dy: 0pt, rect(width: width, height: height, fill: none, stroke: options.grid-stroke))
-    place(dx: 0pt, dy: 0pt, rect(width: 5 * unit, height: 5 * unit, fill: none, stroke: options.grid-stroke))
-    place(dx: 5 * unit, dy: 0pt, rect(width: 3 * unit, height: 3 * unit, fill: none, stroke: options.grid-stroke))
-    place(dx: 5 * unit, dy: 3 * unit, rect(width: 2 * unit, height: 2 * unit, fill: none, stroke: options.grid-stroke))
+    place(dx: 0pt, dy: 5 * unit, rect(width: 8 * unit, height: 8 * unit, fill: none, stroke: grid-stroke))
+    place(dx: 0pt, dy: 0pt, rect(width: 5 * unit, height: 5 * unit, fill: none, stroke: grid-stroke))
+    place(dx: 5 * unit, dy: 0pt, rect(width: 3 * unit, height: 3 * unit, fill: none, stroke: grid-stroke))
+    place(dx: 6 * unit, dy: 3 * unit, rect(width: 2 * unit, height: 2 * unit, fill: none, stroke: grid-stroke))
+    place(dx: 5 * unit, dy: 3 * unit, rect(width: unit, height: unit, fill: none, stroke: grid-stroke))
+    place(dx: 5 * unit, dy: 4 * unit, rect(width: unit, height: unit, fill: none, stroke: grid-stroke))
     place(dx: 0pt, dy: 0pt, curve(
       fill: none,
-      stroke: options.curve-stroke,
-      curve.move((0.35 * unit, 4.65 * unit)),
-      curve.cubic(none, (3.8 * unit, 4.65 * unit), (5 * unit, 3.2 * unit)),
-      curve.cubic((5 * unit, 1.5 * unit), none, (6.45 * unit, 1.5 * unit)),
-      curve.cubic((7.7 * unit, 1.5 * unit), (7.7 * unit, 3.9 * unit), (6.45 * unit, 4.55 * unit)),
-      curve.cubic((5.4 * unit, 4.85 * unit), (3.5 * unit, 4.9 * unit), (3.4 * unit, 3.65 * unit)),
+      stroke: curve-stroke,
+      curve.move((8 * unit, 13 * unit)),
+      curve.cubic((3.5817 * unit, 13 * unit), (0pt, 9.4183 * unit), (0pt, 5 * unit)),
+      curve.cubic((0pt, 2.2386 * unit), (2.2386 * unit, 0pt), (5 * unit, 0pt)),
+      curve.cubic((6.6569 * unit, 0pt), (8 * unit, 1.3431 * unit), (8 * unit, 3 * unit)),
+      curve.cubic((8 * unit, 4.1046 * unit), (7.1046 * unit, 5 * unit), (6 * unit, 5 * unit)),
+      curve.cubic((5.4477 * unit, 5 * unit), (5 * unit, 4.5523 * unit), (5 * unit, 4 * unit)),
+      curve.cubic((5 * unit, 3.4477 * unit), (5.4477 * unit, 3 * unit), (6 * unit, 3 * unit)),
     ))
   })
-  if options.position == "left" { align(left, geometry) } else if options.position == "right" { align(right, geometry) } else { align(center, geometry) }
+  place(
+    dx: (page-width - width) / 2 - left,
+    dy: (page-height - height) / 2 - top,
+    geometry,
+  )
 })
 
 #let cover-metadata(config, theme, title-supplied, options) = layout(size => {
@@ -136,13 +149,14 @@
 
 #let cover-page(config, theme, title-supplied: false) = {
   let options = cover-options(theme)
+  cover-background(config, theme)
   if theme.cover-style == "technical" {
     rect(width: 100%, height: 10pt, fill: theme.colors.accent)
   } else if theme.cover-style == "report" {
     rect(width: 34%, height: 8pt, fill: theme.colors.accent-gold)
   }
   v(options.top-spacing)
-  cover-signature(options)
+  v(5 * options.signature-cap)
   v(options.metadata-spacing)
   cover-metadata(config, theme, title-supplied, options)
   v(1fr)
