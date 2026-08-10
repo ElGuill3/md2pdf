@@ -42,8 +42,8 @@ Order: PR 1 → main; after PR 1 merges, PR 2 → updated main; after PR 2 merge
 ## Phase 3: REFACTOR — Compatibility and Evidence
 
 - [x] 3.1 Refactor private Typst helpers for valid `layout`/`measure`/`curve` geometry and readable containment; forbid clipping, ellipsis, fixed-height text, new assets, dependencies, schema fields, or forced breaks.
-- [ ] 3.2 Update `docs/configuration.md` for sparse covers, Academic dedicated covers, changed furniture defaults, title fallback/provenance, and preserved overrides.
-- [ ] 3.3 Run `./tests/run.sh && ./tests/skill-installer.sh`, `sh -n md2pdf install.sh uninstall.sh install-skill.sh tests/run.sh tests/skill-installer.sh`, and `git diff --check`; record semantic, bbox, raster, and manual evidence in the verification receipt.
+- [x] 3.2 Update `docs/configuration.md` for sparse covers, Academic dedicated covers, changed furniture defaults, title fallback/provenance, and preserved overrides.
+- [x] 3.3 Run `./tests/run.sh && ./tests/skill-installer.sh`, `sh -n md2pdf install.sh uninstall.sh install-skill.sh tests/run.sh tests/skill-installer.sh`, and `git diff --check`; record semantic, bbox, raster, and manual evidence in the verification receipt.
 
 Threat matrix conclusion: documentation-like paths, Git selection, commit state, push state, and PR commands remain N/A; no threat RED tests apply.
 

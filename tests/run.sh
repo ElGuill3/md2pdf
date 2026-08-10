@@ -643,6 +643,17 @@ for profile in general technical report academic; do
     "1. Override heading" "$TMP_ROOT/structure-$profile.txt"
   assert_not_contains "$profile keeps default profile header disabled" \
     " · Structure Overrides" "$TMP_ROOT/structure-$profile.txt"
+  if awk -F'"' '
+      /<page / { height=$4 }
+      /<word / && />Override<\/word>/ && $4 < 70 { found=1 }
+      /<word / && $4 > height - 70 &&
+        (/>1<\/word>/ || />Structure<\/word>/ || />Overrides<\/word>/) { found=1 }
+      END { exit found }
+    ' "$TMP_ROOT/structure-$profile.html"; then
+    pass "$profile disabled furniture excludes header and footer output zones"
+  else
+    fail "$profile disabled furniture excludes header and footer output zones"
+  fi
   if awk -F'"' '/>Override</ { found=1; ok=($2 >= 70 && $2 <= 100); exit } END { exit !(found && ok) }' \
       "$TMP_ROOT/structure-$profile.html"; then
     pass "$profile honors one-inch margin override"
