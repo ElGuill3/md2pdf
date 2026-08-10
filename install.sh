@@ -4,7 +4,7 @@ set -u
 umask 077
 
 PROGRAM=md2pdf-install
-VERSION=0.2.0
+VERSION=0.3.0
 PREFIX=
 DRY_RUN=false
 data_stage=
@@ -137,6 +137,7 @@ marker_matches() {
     if IFS= read -r marker_extra; then return 1; fi
     case $marker_version in
       "md2pdf-install $VERSION") marker_managed_version=$VERSION ;;
+      'md2pdf-install 0.2.0') marker_managed_version=0.2.0 ;;
       'md2pdf-install 0.1.0') marker_managed_version=0.1.0 ;;
       *) return 1 ;;
     esac
@@ -152,7 +153,7 @@ launcher_matches() {
   [ -f "$launcher" ] && [ ! -L "$launcher" ] || return 1
   case $expected_version in
     "$VERSION") expected_signature="INSTALL_SIGNATURE='md2pdf-public-launcher-$VERSION'" ;;
-    0.1.0) expected_signature="INSTALL_SIGNATURE='md2pdf-public-launcher-0.1.0'" ;;
+    0.2.0|0.1.0) expected_signature="INSTALL_SIGNATURE='md2pdf-public-launcher-$expected_version'" ;;
     *) return 1 ;;
   esac
   found_program=false

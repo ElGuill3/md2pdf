@@ -873,7 +873,7 @@ local function fetch_remote_image(image, target)
     "--connect-timeout", "5",
     "--max-time", "20",
     "--max-filesize", tostring(max_remote_bytes),
-    "--user-agent", "md2pdf/0.2.0",
+    "--user-agent", "md2pdf/0.3.0",
     "--output", download,
     "--write-out", "%{content_type}",
     "--",

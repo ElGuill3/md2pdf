@@ -1,6 +1,6 @@
 # Know what will render consistently
 
-`md2pdf 0.2.0` supports current Linux and macOS systems with POSIX `sh`, Pandoc
+`md2pdf 0.3.0` supports current Linux and macOS systems with POSIX `sh`, Pandoc
 3.8, Typst 0.15, and curl for HTTPS images. Poppler is needed only for the test
 suite and visual inspection.
 

@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-10
+
+### Added
+
+- Profile-aware cover compositions that keep sparse, long, and multilingual
+  metadata readable while preserving each profile's visual identity.
+- Contextual running headers and footers with chapter-aware labels, document
+  title fallbacks, page numbering, and explicit override controls.
+
+### Changed
+
+- Every profile cover now uses one faint, page-scale Fibonacci construction
+  with tightly clipped outer geometry and no duplicate boxed signature.
+- Cover pages honor configured paper and orientation, occupy a dedicated page,
+  and suppress running furniture until the body begins.
+- Profile-specific level-one heading bands preserve normal document flow near
+  page boundaries.
+- Product identity now reports `0.3.0`, and the installer safely upgrades
+  matching managed `0.1.0` and `0.2.0` installations.
+
 ## [0.2.0] - 2026-07-28
 
 ### Added

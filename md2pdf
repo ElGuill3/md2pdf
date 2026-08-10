@@ -3,9 +3,9 @@
 set -u
 
 PROGRAM=md2pdf
-VERSION=0.2.0
+VERSION=0.3.0
 # This signature lets uninstall.sh distinguish the public launcher from other files.
-INSTALL_SIGNATURE='md2pdf-public-launcher-0.2.0'
+INSTALL_SIGNATURE='md2pdf-public-launcher-0.3.0'
 stage_dir=
 publish_tmp=
 caller_umask=$(umask)

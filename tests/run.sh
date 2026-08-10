@@ -123,10 +123,22 @@ portable_mode() {
 
 create_legacy_launcher() {
   awk '
-    $0 == "VERSION=0.2.0" { print "VERSION=0.1.0"; next }
+    $0 == "VERSION=0.3.0" { print "VERSION=0.1.0"; next }
     /^INSTALL_SIGNATURE=/ {
       quote = sprintf("%c", 39)
       print "INSTALL_SIGNATURE=" quote "md2pdf-public-launcher-0.1.0" quote
+      next
+    }
+    { print }
+  ' "$CLI" > "$1" && chmod 755 "$1"
+}
+
+create_previous_launcher() {
+  awk '
+    $0 == "VERSION=0.3.0" { print "VERSION=0.2.0"; next }
+    /^INSTALL_SIGNATURE=/ {
+      quote = sprintf("%c", 39)
+      print "INSTALL_SIGNATURE=" quote "md2pdf-public-launcher-0.2.0" quote
       next
     }
     { print }
@@ -220,7 +232,7 @@ if [ "${MD2PDF_TEST_PROGRESS_ONLY:-0}" = 1 ]; then
 fi
 
 run_status "version exits successfully" 0 "$CLI" --version
-assert_contains "version is stable" "md2pdf 0.2.0" "$last_stdout"
+assert_contains "version is stable" "md2pdf 0.3.0" "$last_stdout"
 run_status "unknown option is rejected" 2 "$CLI" --unknown
 assert_contains "unknown option diagnostic is stable" "md2pdf: unknown option: --unknown" "$last_stderr"
 run_status "invalid profile is rejected" 2 "$CLI" --profile invalid "$SOURCE/simple.md"
@@ -1391,9 +1403,24 @@ run_status "default XDG installation dry-run succeeds" 0 \
   env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
     "$ROOT/install.sh" --dry-run
 assert_contains "installation dry-run reports version" \
-  "Would install md2pdf 0.2.0" "$last_stdout"
+  "Would install md2pdf 0.3.0" "$last_stdout"
 assert_absent "installation dry-run creates no launcher" "$install_bin/md2pdf"
 assert_absent "installation dry-run creates no runtime" "$install_data/md2pdf"
+
+previous_prefix=$TMP_ROOT/previous-prefix
+mkdir -p "$previous_prefix/bin" "$previous_prefix/share/md2pdf"
+create_previous_launcher "$previous_prefix/bin/md2pdf"
+printf '%s\n%s\n%s\n' 'md2pdf-install 0.2.0' \
+  "bin=$previous_prefix/bin/md2pdf" "data=$previous_prefix/share/md2pdf" \
+  > "$previous_prefix/share/md2pdf/.install-manifest"
+run_status "managed 0.2.0 installation upgrades to 0.3.0" 0 \
+  "$ROOT/install.sh" --prefix "$previous_prefix"
+run_status "upgraded previous launcher reports version 0.3.0" 0 \
+  "$previous_prefix/bin/md2pdf" --version
+assert_contains "upgraded previous launcher uses the public version" \
+  "md2pdf 0.3.0" "$last_stdout"
+assert_contains "upgraded previous marker records version 0.3.0" \
+  "md2pdf-install 0.3.0" "$previous_prefix/share/md2pdf/.install-manifest"
 
 legacy_prefix=$TMP_ROOT/legacy-prefix
 mkdir -p "$legacy_prefix/bin" "$legacy_prefix/share/md2pdf"
@@ -1401,14 +1428,14 @@ create_legacy_launcher "$legacy_prefix/bin/md2pdf"
 printf '%s\n%s\n%s\n' 'md2pdf-install 0.1.0' \
   "bin=$legacy_prefix/bin/md2pdf" "data=$legacy_prefix/share/md2pdf" \
   > "$legacy_prefix/share/md2pdf/.install-manifest"
-run_status "managed 0.1.0 installation upgrades to 0.2.0" 0 \
+run_status "managed 0.1.0 installation upgrades to 0.3.0" 0 \
   "$ROOT/install.sh" --prefix "$legacy_prefix"
-run_status "upgraded legacy launcher reports version 0.2.0" 0 \
+run_status "upgraded legacy launcher reports version 0.3.0" 0 \
   "$legacy_prefix/bin/md2pdf" --version
 assert_contains "upgraded legacy launcher uses the public version" \
-  "md2pdf 0.2.0" "$last_stdout"
-assert_contains "upgraded legacy marker records version 0.2.0" \
-  "md2pdf-install 0.2.0" "$legacy_prefix/share/md2pdf/.install-manifest"
+  "md2pdf 0.3.0" "$last_stdout"
+assert_contains "upgraded legacy marker records version 0.3.0" \
+  "md2pdf-install 0.3.0" "$legacy_prefix/share/md2pdf/.install-manifest"
 
 mismatched_legacy_prefix=$TMP_ROOT/mismatched-legacy-prefix
 mkdir -p "$mismatched_legacy_prefix/bin" "$mismatched_legacy_prefix/share/md2pdf"
@@ -1419,7 +1446,7 @@ printf '%s\n%s\n%s\n' 'md2pdf-install 0.1.0' \
   > "$mismatched_legacy_prefix/share/md2pdf/.install-manifest"
 cp "$mismatched_legacy_prefix/bin/md2pdf" "$TMP_ROOT/mismatched-launcher.expected"
 cp "$mismatched_legacy_prefix/share/md2pdf/.install-manifest" "$TMP_ROOT/mismatched-marker.expected"
-run_status "legacy marker with a 0.2.0 launcher is refused" 1 \
+run_status "legacy marker with a 0.3.0 launcher is refused" 1 \
   "$ROOT/install.sh" --prefix "$mismatched_legacy_prefix"
 assert_contains "mismatched legacy ownership reports an unmanaged launcher" \
   "refusing to replace an unmanaged launcher" "$last_stderr"
@@ -1455,8 +1482,8 @@ run_status "default XDG installation succeeds" 0 \
     "$ROOT/install.sh"
 installed_cli=$install_bin/md2pdf
 installed_data=$install_data/md2pdf
-run_status "installed launcher reports version 0.2.0" 0 "$installed_cli" --version
-assert_contains "installed launcher version is stable" "md2pdf 0.2.0" "$last_stdout"
+run_status "installed launcher reports version 0.3.0" 0 "$installed_cli" --version
+assert_contains "installed launcher version is stable" "md2pdf 0.3.0" "$last_stdout"
 if [ -x "$installed_cli" ] && [ -x "$installed_data/uninstall.sh" ]; then
   pass "installation preserves launcher and uninstaller executable modes"
 else
@@ -1563,7 +1590,7 @@ run_status "custom prefix with repeated separator installs" 0 \
   env HOME="$install_home" "$ROOT/install.sh" --prefix "$install_prefix_input"
 run_status "custom prefix launcher reports version" 0 \
   "$install_prefix/bin/md2pdf" --version
-assert_contains "custom prefix uses the public version" "md2pdf 0.2.0" "$last_stdout"
+assert_contains "custom prefix uses the public version" "md2pdf 0.3.0" "$last_stdout"
 run_status "custom prefix uninstallation succeeds" 0 \
   env HOME="$install_home" "$install_prefix/share/md2pdf/uninstall.sh" \
     --prefix "$install_prefix"

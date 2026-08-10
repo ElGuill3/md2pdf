@@ -44,7 +44,7 @@ md2pdf --profile technical --output build/notes.pdf notes.md
 | `-o FILE`, `--output FILE` | Writes the PDF to `FILE`. |
 | `--profile NAME` | Selects `general`, `technical`, `report`, or `academic`. |
 | `-q`, `--quiet` | Suppresses progress and the final success line; warnings and errors remain visible. |
-| `--version` | Prints `md2pdf 0.2.0`. |
+| `--version` | Prints `md2pdf 0.3.0`. |
 | `-h`, `--help` | Prints usage and exit codes. |
 
 `md2pdf INPUT OUTPUT` remains available as a positional compatibility form. Do
@@ -230,7 +230,7 @@ access is available, or enforce network isolation outside `md2pdf`.
 
 ## Compatibility And Limits
 
-`md2pdf 0.2.0` targets current Linux and macOS releases with POSIX `sh`. Windows
+`md2pdf 0.3.0` targets current Linux and macOS releases with POSIX `sh`. Windows
 is not supported. Fonts are not bundled, so identical bytes and line breaks
 require matching font installations. Preferred families and deterministic
 fallback order are documented in [Compatibility](docs/compatibility.md), and a
