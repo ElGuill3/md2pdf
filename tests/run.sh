@@ -351,8 +351,12 @@ for profile in general technical report academic; do
     "Ada Example" "$profile_text"
   assert_contains "$profile output retains its date" \
     "2026-07-14" "$profile_text"
-  assert_contains "$profile running header uses the document title" \
-    "Profile Reference" "$profile_last_page_text"
+  case $profile in
+    general|report) last_page_chapter="Normal Flow Marker" ;;
+    technical|academic) last_page_chapter="Boundary Flow Marker" ;;
+  esac
+  assert_contains "$profile last-page header uses chapter context" \
+    "$last_page_chapter" "$profile_last_page_text"
   assert_contains "$profile last page retains page numbering" \
     "$profile_pages" "$profile_last_page_text"
   for automatic_profile_label in TECHNICAL REPORT ACADEMIC TÉCNICO INFORME ACADÉMICO; do
@@ -374,27 +378,154 @@ for profile in general technical report academic; do
   run_status "$profile body page rasterizes" 0 \
     pdftoppm -f "$profile_body_page" -singlefile -png -r 72 \
       "$profile_pdf" "$TMP_ROOT/profile-$profile-body"
+  pdftotext -f "$profile_body_page" -l "$profile_body_page" -bbox \
+    "$profile_pdf" "$TMP_ROOT/profile-$profile-body.html"
+  if awk -F'"' '/<word / && />Architecture<\/word>/ { if ($4 < 70) found=1 } END { exit !found }' \
+      "$TMP_ROOT/profile-$profile-body.html"; then
+    pass "$profile current-page heading supplies the running header"
+  else
+    fail "$profile current-page heading supplies the running header"
+  fi
+  if awk -F'"' -v number="$profile_body_page" '
+    /<page / { width=$2; height=$4 }
+    $0 ~ ">" number "<\\/word>" && $4 > height - 70 && $2 < width / 2 { found=1 }
+    END { exit !found }
+  ' "$TMP_ROOT/profile-$profile-body.html"; then
+    pass "$profile page number occupies the left footer zone"
+  else
+    fail "$profile page number occupies the left footer zone"
+  fi
+  if awk -F'"' '
+    /<page / { width=$2; height=$4 }
+    /<word / && />Ελληνικά<\/word>/ && $4 > height - 70 && $2 > width / 2 { found=1 }
+    END { exit !found }
+  ' "$TMP_ROOT/profile-$profile-body.html"; then
+    pass "$profile document title occupies the right footer zone"
+  else
+    fail "$profile document title occupies the right footer zone"
+  fi
+  case $profile in
+    general)
+      heading_inset=76
+      ;;
+    technical)
+      heading_inset=56
+      ;;
+    report)
+      heading_inset=85
+      ;;
+    academic)
+      heading_inset=74
+      ;;
+  esac
+  if awk -F'"' -v minimum="$heading_inset" '
+      /<word / && />Architecture<\/word>/ && $4 > 70 && $2 > minimum { found=1 }
+      END { exit !found }
+    ' "$TMP_ROOT/profile-$profile-body.html"; then
+    pass "$profile level-one band has its profile-aware inset"
+  else
+    fail "$profile level-one band has its profile-aware inset"
+  fi
+  boundary_page=0
+  page_probe=$profile_body_page
+  while [ "$page_probe" -le "$profile_pages" ]; do
+    page_probe_text=$TMP_ROOT/profile-$profile-page-$page_probe.txt
+    pdftotext -f "$page_probe" -l "$page_probe" "$profile_pdf" "$page_probe_text"
+    if grep -F "Boundary Flow Marker" "$page_probe_text" >/dev/null 2>&1 && \
+       grep -F "BOUNDARY_FLOW_MARKER" "$page_probe_text" >/dev/null 2>&1; then
+      boundary_page=$page_probe
+      break
+    fi
+    page_probe=$((page_probe + 1))
+  done
+  if [ "$boundary_page" -gt 0 ]; then
+    pass "$profile boundary heading follows ordinary pagination with its content"
+  else
+    fail "$profile boundary heading follows ordinary pagination with its content"
+  fi
+  if grep -F "Architecture" "$TMP_ROOT/profile-$profile-page-$profile_body_page.txt" >/dev/null 2>&1 && \
+     grep -F "Verification" "$TMP_ROOT/profile-$profile-page-$profile_body_page.txt" >/dev/null 2>&1; then
+    pass "$profile level-one headings do not force chapter page breaks"
+  else
+    fail "$profile level-one headings do not force chapter page breaks"
+  fi
   case $profile in
     general)
       assert_contains "General keeps balanced cover identity" "Profile Reference" "$profile_text"
       ;;
     technical)
-      assert_contains "Technical footer uses author semantics" \
-        "Ada Example" "$profile_last_page_text"
+      assert_contains "Technical footer uses document-title semantics" \
+        "Profile Reference" "$profile_last_page_text"
       assert_contains "Technical numbers sections by default" "1. Architecture" "$profile_text"
       ;;
     report)
-      assert_contains "Report footer uses date semantics" \
-        "2026-07-14" "$profile_last_page_text"
+      assert_contains "Report footer uses document-title semantics" \
+        "Profile Reference" "$profile_last_page_text"
       assert_contains "Report numbers sections by default" "1. Architecture" "$profile_text"
       ;;
     academic)
-      assert_contains "Academic footer uses author semantics" \
-        "Ada Example" "$profile_last_page_text"
+      assert_contains "Academic footer uses document-title semantics" \
+        "Profile Reference" "$profile_last_page_text"
       assert_contains "Academic numbers equations by default" "(1)" "$profile_text"
       ;;
   esac
 done
+
+cat > "$SOURCE/contextual-furniture.md" <<'EOF'
+---
+title: Contextual Furniture
+md2pdf:
+  cover: false
+  toc: false
+---
+
+# Context Chapter
+
+EOF
+context_line=1
+while [ "$context_line" -le 42 ]; do
+  printf '%s\n\n' \
+    "CONTEXT_FLOW_$context_line keeps chapter context observable across ordinary page flow without a forced chapter break." \
+    >> "$SOURCE/contextual-furniture.md"
+  context_line=$((context_line + 1))
+done
+run_status "contextual furniture fixture renders" 0 \
+  "$CLI" "$SOURCE/contextual-furniture.md" "$OUTPUT/contextual-furniture.pdf"
+pdfinfo "$OUTPUT/contextual-furniture.pdf" > "$TMP_ROOT/contextual-furniture.info"
+context_pages=$(awk '/^Pages:/ { print $2 }' "$TMP_ROOT/contextual-furniture.info")
+if [ "$context_pages" -ge 2 ]; then
+  pass "contextual furniture spans multiple ordinary-flow pages"
+else
+  fail "contextual furniture spans multiple ordinary-flow pages"
+fi
+pdftotext -f "$context_pages" -l "$context_pages" -bbox \
+  "$OUTPUT/contextual-furniture.pdf" "$TMP_ROOT/contextual-furniture-last.html"
+if awk -F'"' '/<word / && />Context<\/word>/ { if ($4 < 70) found=1 } END { exit !found }' \
+    "$TMP_ROOT/contextual-furniture-last.html"; then
+  pass "latest earlier level-one heading supplies the running header"
+else
+  fail "latest earlier level-one heading supplies the running header"
+fi
+
+cat > "$SOURCE/title-fallback.md" <<'EOF'
+---
+title: Title Fallback Sentinel
+md2pdf:
+  cover: false
+  toc: false
+---
+
+Body content without a level-one heading keeps the document-title fallback.
+EOF
+run_status "title fallback fixture renders" 0 \
+  "$CLI" "$SOURCE/title-fallback.md" "$OUTPUT/title-fallback.pdf"
+pdftotext -f 1 -l 1 -bbox "$OUTPUT/title-fallback.pdf" "$TMP_ROOT/title-fallback.html"
+if awk -F'"' '/<word / && />Fallback<\/word>/ { if ($4 < 70) found=1 } END { exit !found }' \
+    "$TMP_ROOT/title-fallback.html"; then
+  pass "document title supplies the header without chapter context"
+else
+  fail "document title supplies the header without chapter context"
+fi
 
 awk '$1 != "title:" { print }' "$SOURCE/profile-reference.md" \
   > "$SOURCE/profile-reference-omitted-title.md"
@@ -541,6 +672,50 @@ assert_contains "structured affiliation list survives" \
 assert_contains "author list survives" "Grace Hopper" "$TMP_ROOT/complex.txt"
 assert_not_contains "top-level false TOC is honored" "Contents" "$TMP_ROOT/complex.txt"
 pdfinfo "$OUTPUT/complex.pdf" > "$TMP_ROOT/complex.info"
+complex_pages=$(awk '/^Pages:/ { print $2 }' "$TMP_ROOT/complex.info")
+pdftotext -f "$complex_pages" -l "$complex_pages" -bbox \
+  "$OUTPUT/complex.pdf" "$TMP_ROOT/complex-last.html"
+if awk -F'"' '/<word / && />Running<\/word>/ { if ($4 < 70) found=1 } END { exit !found }' \
+    "$TMP_ROOT/complex-last.html"; then
+  pass "explicit header text remains in the header zone"
+else
+  fail "explicit header text remains in the header zone"
+fi
+if awk -F'"' '
+    /<page / { width=$2; height=$4 }
+    /<word / && />Footer<\/word>/ && $4 > height - 70 && $2 > width / 2 { found=1 }
+    END { exit !found }
+  ' "$TMP_ROOT/complex-last.html"; then
+  pass "explicit footer text remains in the right footer zone"
+else
+  fail "explicit footer text remains in the right footer zone"
+fi
+if awk -F'"' -v number="$complex_pages" '
+    /<page / { width=$2; height=$4 }
+    $0 ~ ">" number "<\\/word>" && $4 > height - 70 && $2 < width / 2 { found=1 }
+    END { exit !found }
+  ' "$TMP_ROOT/complex-last.html"; then
+  pass "explicit numbering remains in the left footer zone"
+else
+  fail "explicit numbering remains in the left footer zone"
+fi
+sed 's/numbering: true/numbering: false/' "$SOURCE/complex.md" \
+  > "$SOURCE/complex-no-numbering.md"
+run_status "footer numbering disable fixture succeeds" 0 \
+  "$CLI" "$SOURCE/complex-no-numbering.md" "$OUTPUT/complex-no-numbering.pdf"
+pdfinfo "$OUTPUT/complex-no-numbering.pdf" > "$TMP_ROOT/complex-no-numbering.info"
+complex_no_number_pages=$(awk '/^Pages:/ { print $2 }' "$TMP_ROOT/complex-no-numbering.info")
+pdftotext -f "$complex_no_number_pages" -l "$complex_no_number_pages" -bbox \
+  "$OUTPUT/complex-no-numbering.pdf" "$TMP_ROOT/complex-no-numbering-last.html"
+if awk -F'"' -v number="$complex_no_number_pages" '
+    /<page / { height=$4 }
+    $0 ~ ">" number "<\\/word>" && $4 > height - 70 { found=1 }
+    END { exit found }
+  ' "$TMP_ROOT/complex-no-numbering-last.html"; then
+  pass "disabled footer numbering stays absent"
+else
+  fail "disabled footer numbering stays absent"
+fi
 assert_contains "author email is retained in intentional PDF metadata" \
   "author-email:ada@example.test" "$TMP_ROOT/complex.info"
 

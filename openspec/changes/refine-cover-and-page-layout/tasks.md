@@ -30,14 +30,14 @@ Order: PR 1 → main; after PR 1 merges, PR 2 → updated main; after PR 2 merge
 
 - [x] 1.1 Extend `tests/fixtures/profile-reference.md` with long/multilingual metadata and stable heading-flow markers; generate omitted-title and explicit-`Document` inputs in `tests/run.sh`.
 - [x] 1.2 Add failing semantic assertions in `tests/run.sh` for sparse supplied metadata, title provenance, dedicated configured covers including Academic, furniture-free page one, and long-title retention.
-- [ ] 1.3 Add failing `pdfinfo`, page-scoped `pdftotext`, `pdftotext -bbox`, raster, and profile-inequality checks for geometry, normal/boundary heading flow, chapter/fallback headers, footer zones, overrides, disables, and numbering.
+- [x] 1.3 Add failing `pdfinfo`, page-scoped `pdftotext`, `pdftotext -bbox`, raster, and profile-inequality checks for geometry, normal/boundary heading flow, chapter/fallback headers, footer zones, overrides, disables, and numbering.
 
 ## Phase 2: GREEN — Core Typst Implementation
 
 - [x] 2.1 Modify `share/md2pdf/typst/template.typ` and `document.typ` to pass private `title-supplied` provenance without changing `config`.
 - [x] 2.2 In `share/md2pdf/typst/page.typ`, implement bounded 8/5/3/2 grid/curve helpers, responsive metadata composition, profile branches, and dedicated furniture-free covers for every profile.
-- [ ] 2.3 In `page.typ`, resolve current-page then latest-earlier level-one headings for header fallback; preserve explicit header/footer text, enablement, and numbering switches with page number left/title right.
-- [ ] 2.4 In `share/md2pdf/typst/theme.typ`, add profile-aware level-one bands that remain breakable and never force a chapter page break; run `sh -n tests/run.sh` and `./tests/run.sh`.
+- [x] 2.3 In `page.typ`, resolve current-page then latest-earlier level-one headings for header fallback; preserve explicit header/footer text, enablement, and numbering switches with page number left/title right.
+- [x] 2.4 In `share/md2pdf/typst/theme.typ`, add profile-aware level-one bands that remain breakable and never force a chapter page break; run `sh -n tests/run.sh` and `./tests/run.sh`.
 
 ## Phase 3: REFACTOR — Compatibility and Evidence
 
@@ -55,3 +55,11 @@ Threat matrix conclusion: documentation-like paths, Git selection, commit state,
 - `sh -n md2pdf install.sh uninstall.sh install-skill.sh tests/run.sh tests/skill-installer.sh tests/fixtures/mock-curl tests/fixtures/typst-proxy` exited 0; `./tests/skill-installer.sh` passed 7/7; `git diff --check` exited 0.
 - Direct `typst compile share/md2pdf/typst/page.typ /tmp/opencode/md2pdf-pr1-evidence/page-direct.pdf` passed with Typst 0.15.0.
 - Visual inspection covered `/tmp/opencode/md2pdf-pr1-evidence/{general,technical,report,academic}-{cover,body}.png`; each cover was furniture-free and each body remained readable with profile distinction.
+
+## Apply Status: PR 2 flow/furniture GREEN
+
+- Eight tasks are complete: 1.1–1.3, 2.1–2.4, and 3.1. Only PR 3 tasks 3.2 and 3.3 remain.
+- Strict-TDD RED: the exact full command exited 1 with 537 passed and 16 expected failures for contextual headers, footer zones, and missing General band geometry.
+- Strict-TDD GREEN/refactor: the exact full command passed 553/553 after contextual heading lookup, footer reordering, breakable profile bands, and test-only geometry correction.
+- Focused CLI → PDF runtime evidence passed 30 checks across all profiles, current/latest-earlier headings, footer placement, rasterization, and body-profile inequality.
+- Authored PR 2 source/test changes are 264 lines (225 additions and 39 deletions), under the 400-line chained-PR budget.

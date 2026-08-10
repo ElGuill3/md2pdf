@@ -91,6 +91,7 @@
       v(1em)
       block(
         width: 100%,
+        breakable: true,
         fill: accent.lighten(92%),
         stroke: (left: 4pt + accent-gold),
         inset: (x: 10pt, y: 6pt),
@@ -99,28 +100,39 @@
       v(0.35em)
     } else if theme.heading-style == "report" {
       v(1.7em)
-      grid(
-        columns: (4pt, 1fr),
-        gutter: 10pt,
-        rect(width: 4pt, height: 26pt, fill: accent-gold),
-        text(size: 19pt, weight: "bold", fill: accent, heading-content(it, numbered: config.section_numbering)),
+      block(
+        width: 100%,
+        breakable: true,
+        fill: accent.lighten(97%),
+        inset: (x: 8pt, y: 5pt),
+        grid(
+          columns: (4pt, 1fr),
+          gutter: 10pt,
+          rect(width: 4pt, height: 26pt, fill: accent-gold),
+          text(size: 19pt, weight: "bold", fill: accent, heading-content(it, numbered: config.section_numbering)),
+        ),
       )
       v(0.45em)
     } else if theme.heading-style == "academic" {
       v(1.35em)
-      set text(size: 14pt, weight: "bold", fill: accent)
-      heading-content(it, numbered: config.section_numbering)
+      block(
+        width: 100%,
+        breakable: true,
+        fill: accent.lighten(96%),
+        stroke: (bottom: 0.6pt + accent-gold),
+        inset: (x: 9pt, y: 5pt),
+        text(size: 14pt, weight: "bold", fill: accent, heading-content(it, numbered: config.section_numbering)),
+      )
       v(0.25em)
     } else {
       v(1.5em)
-      set text(size: 18pt, weight: "bold", fill: accent)
-      heading-content(it, numbered: config.section_numbering)
-      v(0.25em)
-      grid(
-        columns: (8pt, 1fr),
-        gutter: 6pt,
-        align(horizon, circle(radius: 3pt, fill: accent-gold)),
-        align(horizon, line(length: 100%, stroke: gradient.linear(accent, rgb("#1a3c6e00")))),
+      block(
+        width: 100%,
+        breakable: true,
+        fill: accent.lighten(96%),
+        stroke: (left: 3pt + accent-gold),
+        inset: (x: 10pt, y: 6pt),
+        text(size: 18pt, weight: "bold", fill: accent, heading-content(it, numbered: config.section_numbering)),
       )
       v(0.5em)
     }
