@@ -83,21 +83,20 @@
   if options.position == "left" { align(left, metadata) } else if options.position == "right" { align(right, metadata) } else { align(center, metadata) }
 })
 
-#let default-header(config) = config.title
-
-#let default-footer(config, theme) = {
-  let authors = config.authors.map(author => author.name).join(", ")
-  if theme.name == "report" and config.date != "" {
-    config.date
-  } else {
-    authors
-  }
-}
-
 #let running-header(config, theme) = context {
   let page-number = counter(page).get().first()
   if config.header.enabled and (not config.cover or page-number > 1) {
-    let label = if config.header.text != "" { config.header.text } else { default-header(config) }
+    let headings = query(heading.where(level: 1))
+    let current = headings.filter(it => it.location().page() == page-number)
+    let earlier = headings.filter(it => it.location().page() < page-number)
+    let chapter = if current.len() > 0 {
+      current.first().body
+    } else if earlier.len() > 0 {
+      earlier.last().body
+    } else {
+      config.title
+    }
+    let label = if config.header.text != "" { config.header.text } else { chapter }
     set text(size: 9pt, fill: theme.colors.gray-mid)
     align(left, text(label))
     v(-0.6em)
@@ -108,15 +107,14 @@
 #let running-footer(config, theme) = context {
   let page-number = counter(page).get().first()
   if config.footer.enabled and (not config.cover or page-number > 1) {
-    let label = if config.footer.text != "" { config.footer.text } else { default-footer(config, theme) }
+    let label = if config.footer.text != "" { config.footer.text } else { config.title }
     set text(size: 9pt, fill: theme.colors.gray-mid)
     line(length: 100%, stroke: 0.5pt + theme.colors.gray-light)
     v(-0.6em)
     grid(
-      columns: (1fr, auto),
-      align(left, text(label)),
+      columns: (auto, 1fr),
       align(
-        right,
+        left,
         if config.footer.numbering {
           box(
             fill: theme.colors.accent,
@@ -131,6 +129,7 @@
           )
         },
       ),
+      align(right, text(label)),
     )
   }
 }
