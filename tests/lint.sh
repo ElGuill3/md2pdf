@@ -66,6 +66,15 @@ else
   fail "shell scripts pass ShellCheck"
 fi
 
+unpinned=$(grep -n -E '^[[:space:]-]*uses:' .github/workflows/*.yml |
+  grep -v -E 'uses:[[:space:]]*[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$)')
+if [ -z "$unpinned" ]; then
+  pass "workflow actions are pinned to full commit SHAs"
+else
+  printf '%s\n' "$unpinned" | sed 's/^/  unpinned action: /' >&2
+  fail "workflow actions are pinned to full commit SHAs"
+fi
+
 if empty_tree=$(git hash-object -t tree /dev/null 2> /dev/null); then
   if git diff --check "$empty_tree" --; then
     pass "tracked files have no whitespace errors"

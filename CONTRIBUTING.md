@@ -24,7 +24,8 @@ Install the external development tools listed in
 ```
 
 `tests/lint.sh` checks shell syntax, executable modes, [ShellCheck](https://www.shellcheck.net)
-findings, and whitespace errors in tracked files. It requires ShellCheck and a
+findings, that workflow actions are pinned to full commit SHAs, and whitespace
+errors in tracked files. It requires ShellCheck and a
 Git checkout; set `SHELLCHECK` to use a different ShellCheck command. Silence a
 ShellCheck finding only for intentional code, with an inline directive that
 states the reason.
