@@ -1627,6 +1627,93 @@ run_status "uninstaller passes POSIX shell syntax" 0 sh -n "$ROOT/uninstall.sh"
 run_status "curl fixture passes POSIX shell syntax" 0 sh -n "$SOURCE/mock-curl"
 run_status "Typst proxy fixture passes POSIX shell syntax" 0 sh -n "$SOURCE/typst-proxy"
 
+DOCS_CHECK=$ROOT/tests/docs.sh
+docs_root=$TMP_ROOT/docs-root
+
+docs_fixture() {
+  rm -rf "$docs_root"
+  mkdir -p "$docs_root/share/md2pdf/filters"
+  for docs_file in md2pdf install.sh uninstall.sh README.md CONTRIBUTING.md \
+    CHANGELOG.md LICENSE; do
+    cp "$ROOT/$docs_file" "$docs_root/$docs_file"
+  done
+  cp -R "$ROOT/docs" "$ROOT/skills" "$docs_root/"
+  cp "$DATA/filters/runtime.lua" "$docs_root/share/md2pdf/filters/runtime.lua"
+}
+
+docs_fixture
+cat >> "$docs_root/README.md" <<'EOF'
+
+See [the site](https://example.invalid/missing) and `[code](nowhere.md)`.
+
+```text
+[fenced](nowhere.md)
+```
+
+## Tool `Boundary` & Rules (v2)
+
+Jump to [the rules](#tool-boundary--rules-v2).
+EOF
+run_status "documentation checks pass on current docs" 0 \
+  "$DOCS_CHECK" "$docs_root"
+docs_stdout=$last_stdout
+docs_stderr=$last_stderr
+assert_contains "documentation checks report every check" \
+  "3 checks passed; 0 checks failed; 3 total" "$docs_stdout"
+assert_empty "documentation checks pass without diagnostics" "$docs_stderr"
+
+docs_fixture
+printf 'See [gone](docs/missing.md).\n' >> "$docs_root/README.md"
+docs_line=$(wc -l < "$docs_root/README.md" | tr -d ' ')
+run_status "documentation checks reject a missing link target" 1 \
+  "$DOCS_CHECK" "$docs_root"
+docs_stdout=$last_stdout
+docs_stderr=$last_stderr
+assert_contains "missing link target is located" \
+  "  README.md:$docs_line: missing link target docs/missing.md" "$docs_stderr"
+assert_contains "missing link target fails the link check" \
+  "not ok - relative links and anchors resolve" "$docs_stderr"
+assert_contains "missing link target leaves other checks passing" \
+  "2 checks passed; 1 checks failed; 3 total" "$docs_stdout"
+
+docs_fixture
+printf 'See [limits](compatibility.md#no-such-heading).\n' \
+  >> "$docs_root/docs/configuration.md"
+docs_line=$(wc -l < "$docs_root/docs/configuration.md" | tr -d ' ')
+run_status "documentation checks reject a missing anchor" 1 \
+  "$DOCS_CHECK" "$docs_root"
+assert_contains "missing anchor is located relative to its document" \
+  "  docs/configuration.md:$docs_line: missing anchor compatibility.md#no-such-heading" \
+  "$last_stderr"
+
+docs_fixture
+# shellcheck disable=SC2016 # The backticks are literal Markdown.
+grep -v -F '`--profile NAME`' "$ROOT/README.md" > "$docs_root/README.md"
+run_status "documentation checks reject an undocumented help option" 1 \
+  "$DOCS_CHECK" "$docs_root"
+docs_stdout=$last_stdout
+docs_stderr=$last_stderr
+assert_contains "undocumented help option is named" \
+  "  README.md does not document: --profile" "$docs_stderr"
+assert_contains "undocumented help option fails the help check" \
+  "not ok - help options are documented in README.md" "$docs_stderr"
+
+docs_fixture
+sed 's/^VERSION=0\.3\.0$/VERSION=9.9.9/' "$ROOT/install.sh" > "$docs_root/install.sh"
+printf 'Upgrade from md2pdf 0.2.0.\n' >> "$docs_root/docs/compatibility.md"
+docs_line=$(wc -l < "$docs_root/docs/compatibility.md" | tr -d ' ')
+run_status "documentation checks reject disagreeing versions" 1 \
+  "$DOCS_CHECK" "$docs_root"
+docs_stdout=$last_stdout
+docs_stderr=$last_stderr
+assert_contains "version mismatch names the surface" \
+  "  install.sh does not contain VERSION=0.3.0" "$docs_stderr"
+assert_contains "stale version mention is located" \
+  "  stale version: docs/compatibility.md:$docs_line:Upgrade from md2pdf 0.2.0." \
+  "$docs_stderr"
+assert_contains "version mismatch fails the version check" \
+  "not ok - version surfaces agree with md2pdf 0.3.0" "$docs_stderr"
+
 non_git_root=$TMP_ROOT/non-git-copy
 mkdir -p "$non_git_root"
 cp "$CLI" "$non_git_root/md2pdf"

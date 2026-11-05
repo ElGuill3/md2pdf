@@ -12,7 +12,7 @@ cd "$ROOT" || exit 1
 SHELLCHECK=${SHELLCHECK:-shellcheck}
 
 EXECUTABLES='md2pdf install.sh uninstall.sh install-skill.sh tests/run.sh
-tests/skill-installer.sh tests/lint.sh'
+tests/skill-installer.sh tests/lint.sh tests/docs.sh'
 SOURCED_FIXTURES='tests/fixtures/bsd-stat tests/fixtures/mock-curl
 tests/fixtures/typst-proxy'
 

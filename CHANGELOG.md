@@ -8,6 +8,9 @@ All notable changes to this project are documented here.
 
 - `tests/lint.sh` checks shell syntax, executable modes, ShellCheck findings,
   and whitespace errors; CI runs it in a dedicated static job.
+- `tests/docs.sh` checks relative links and anchors, that every `--help`
+  option is documented, and that version surfaces agree; CI runs it with the
+  static checks.
 
 ## [0.3.0] - 2026-08-10
 
