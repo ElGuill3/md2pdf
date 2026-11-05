@@ -16,7 +16,8 @@ All notable changes to this project are documented here.
 ### Changed
 
 - CI runs once per pull request, on pushes to `main` and release tags, and on
-  manual dispatch; a new push cancels the stale pull request run.
+  manual dispatch; a new push cancels the stale pull request run, while every
+  `main`, tag, and manual run completes.
 - CI jobs have time limits, actions are pinned to full commit SHAs, and
   `tests/lint.sh` rejects unpinned actions.
 
