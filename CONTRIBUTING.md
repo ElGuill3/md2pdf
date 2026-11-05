@@ -18,9 +18,15 @@ Install the external development tools listed in
 
 ```sh
 ./tests/run.sh
-sh -n md2pdf install.sh uninstall.sh tests/run.sh
-git diff --check
+./tests/skill-installer.sh
+./tests/lint.sh
 ```
+
+`tests/lint.sh` checks shell syntax, executable modes, [ShellCheck](https://www.shellcheck.net)
+findings, and whitespace errors in tracked files. It requires ShellCheck and a
+Git checkout; set `SHELLCHECK` to use a different ShellCheck command. Silence a
+ShellCheck finding only for intentional code, with an inline directive that
+states the reason. CI runs the same scripts on every pull request.
 
 The suite must remain usable outside a Git worktree. Installation tests must use
 temporary HOME, XDG, or prefix paths and must never write to the real user

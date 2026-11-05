@@ -5,6 +5,7 @@ set -u
 PROGRAM=md2pdf
 VERSION=0.3.0
 # This signature lets uninstall.sh distinguish the public launcher from other files.
+# shellcheck disable=SC2034 # Read by install.sh and uninstall.sh, not here.
 INSTALL_SIGNATURE='md2pdf-public-launcher-0.3.0'
 stage_dir=
 publish_tmp=

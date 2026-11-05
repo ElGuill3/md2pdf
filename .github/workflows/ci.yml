@@ -8,6 +8,20 @@ permissions:
   contents: read
 
 jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Report ShellCheck version
+        run: shellcheck --version
+
+      - name: Run static checks
+        run: ./tests/lint.sh
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -44,19 +58,11 @@ jobs:
           brew install poppler
           brew install --cask font-noto-sans font-noto-serif font-noto-serif-cjk-sc font-noto-naskh-arabic font-noto-serif-hebrew font-noto-sans-mono
 
-      - name: Verify shell syntax and source modes
+      - name: Verify shell syntax with the platform sh
         run: |
-          sh -n md2pdf install.sh uninstall.sh install-skill.sh tests/run.sh tests/skill-installer.sh
-          sh -n tests/fixtures/bsd-stat tests/fixtures/mock-curl tests/fixtures/typst-proxy
-          test -x md2pdf
-          test -x install.sh
-          test -x uninstall.sh
-          test -x install-skill.sh
-          test -x tests/run.sh
-          test -x tests/skill-installer.sh
-          test ! -x tests/fixtures/bsd-stat
-          test ! -x tests/fixtures/mock-curl
-          test ! -x tests/fixtures/typst-proxy
+          for script in md2pdf install.sh uninstall.sh install-skill.sh tests/*.sh tests/fixtures/bsd-stat tests/fixtures/mock-curl tests/fixtures/typst-proxy; do
+            sh -n "$script"
+          done
 
       - name: Run real PDF suite
         run: ./tests/run.sh

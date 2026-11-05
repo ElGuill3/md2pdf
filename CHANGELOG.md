@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- `tests/lint.sh` checks shell syntax, executable modes, ShellCheck findings,
+  and whitespace errors; CI runs it in a dedicated static job.
+
 ## [0.3.0] - 2026-08-10
 
 ### Added

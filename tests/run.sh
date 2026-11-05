@@ -665,6 +665,7 @@ for profile_pair in \
   'technical academic' \
   'report academic'
 do
+  # shellcheck disable=SC2086 # Split the pair into two profile names.
   set -- $profile_pair
   left_profile=$1
   right_profile=$2
@@ -733,6 +734,7 @@ run_status "complex typed YAML succeeds" 0 \
   "$CLI" "$SOURCE/complex.md" "$OUTPUT/complex.pdf"
 pdftotext "$OUTPUT/complex.pdf" "$TMP_ROOT/complex.txt"
 assert_contains "quoted title word survives" "Quoted" "$TMP_ROOT/complex.txt"
+# shellcheck disable=SC1003 # The expected text ends with a literal backslash.
 assert_contains "title backslash survives" 'with a \' "$TMP_ROOT/complex.txt"
 assert_contains "title backslash word survives" "backslash" "$TMP_ROOT/complex.txt"
 assert_contains "structured author name survives" "Ada Lovelace" "$TMP_ROOT/complex.txt"
@@ -924,6 +926,7 @@ else
   fail "failed conversion preserves existing target"
 fi
 
+# shellcheck disable=SC2016 # The inner sh expands its own arguments.
 run_status "new PDF honors caller umask" 0 \
   sh -c 'umask 027; exec "$1" "$2" "$3"' sh \
     "$CLI" "$SOURCE/simple.md" "$OUTPUT/umask.pdf"
@@ -937,6 +940,7 @@ fi
 
 printf 'existing target\n' > "$OUTPUT/preserved-mode.pdf"
 chmod 600 "$OUTPUT/preserved-mode.pdf"
+# shellcheck disable=SC2016 # The inner sh expands its own arguments.
 run_status "existing PDF mode is preserved across atomic replacement" 0 \
   sh -c 'umask 022; exec "$1" "$2" "$3"' sh \
     "$CLI" "$SOURCE/simple.md" "$OUTPUT/preserved-mode.pdf"
@@ -1494,6 +1498,7 @@ install_work=$TMP_ROOT/installed-conversion
 mkdir -p "$install_work/assets"
 cp "$SOURCE/local-svg.md" "$install_work/document.md"
 cp "$SOURCE/assets/mark.svg" "$install_work/assets/mark.svg"
+# shellcheck disable=SC2016 # The inner sh expands its own arguments.
 run_status "installed launcher converts from another working directory" 0 \
   env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
     sh -c 'cd "$1" && "$2" document.md result.pdf' sh \
@@ -1515,6 +1520,7 @@ else
 fi
 
 secure_prefix=$TMP_ROOT/secure-prefix
+# shellcheck disable=SC2016 # The inner sh expands its own arguments.
 run_status "hostile umask installation succeeds" 0 sh -c \
   'umask 000; exec "$1" --prefix "$2"' sh "$ROOT/install.sh" "$secure_prefix"
 bad_mode=
