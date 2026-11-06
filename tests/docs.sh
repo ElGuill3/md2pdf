@@ -94,7 +94,9 @@ link_errors=$(
       path=${target%%#*}
       anchor=
       case $target in
-        *'#'*) anchor=${target#*#} ;;
+        # The leading parenthesis keeps bash 3.2 (macOS sh) from ending the
+        # command substitution at the pattern's closing parenthesis.
+        (*'#'*) anchor=${target#*#} ;;
       esac
       if [ -z "$path" ]; then
         resolved=$file
