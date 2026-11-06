@@ -134,6 +134,7 @@ marker_matches() {
     IFS= read -r marker_version || return 1
     IFS= read -r marker_bin || return 1
     IFS= read -r marker_data || return 1
+    # shellcheck disable=SC2034 # Any fourth line rejects the marker.
     if IFS= read -r marker_extra; then return 1; fi
     case $marker_version in
       "md2pdf-install $VERSION") marker_managed_version=$VERSION ;;

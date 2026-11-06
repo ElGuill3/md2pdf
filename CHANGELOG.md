@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- `tests/lint.sh` checks shell syntax, executable modes, ShellCheck findings,
+  and whitespace errors; CI runs it in a dedicated static job.
+- `tests/docs.sh` checks relative links and anchors, that every `--help`
+  option is documented, and that version surfaces agree; CI runs it with the
+  static checks.
+- Dependabot proposes weekly GitHub Actions updates.
+
+### Changed
+
+- CI runs once per pull request, on pushes to `main` and release tags, and on
+  manual dispatch; a new push cancels the stale pull request run, while every
+  `main`, tag, and manual run completes.
+- CI jobs have time limits, actions are pinned to full commit SHAs, and
+  `tests/lint.sh` rejects unpinned actions.
+
 ## [0.3.0] - 2026-08-10
 
 ### Added

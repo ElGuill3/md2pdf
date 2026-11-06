@@ -2,15 +2,48 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+    tags:
+      - 'v*'
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Pull request runs share one group per pull request, so a new push cancels the
+# stale run. Every other run gets its own group, so no main or tag run is ever
+# cancelled or dropped while pending.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  static:
+    name: Static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Report ShellCheck version
+        run: shellcheck --version
+
+      - name: Run static checks
+        run: ./tests/lint.sh
+
+      - name: Run documentation checks
+        run: ./tests/docs.sh
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -20,15 +53,17 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       - name: Install Pandoc 3.8
-        uses: pandoc/actions/setup@v1
+        uses: pandoc/actions/setup@86321b6dd4675f5014c611e05088e10d4939e09e # v1.1.1
         with:
           version: '3.8'
 
       - name: Install Typst 0.15.0
-        uses: typst-community/setup-typst@v5
+        uses: typst-community/setup-typst@6a2cfaf0b28d636b00148f965e315bae81079aaa # v5.3.1
         with:
           typst-version: 0.15.0
 
@@ -44,19 +79,11 @@ jobs:
           brew install poppler
           brew install --cask font-noto-sans font-noto-serif font-noto-serif-cjk-sc font-noto-naskh-arabic font-noto-serif-hebrew font-noto-sans-mono
 
-      - name: Verify shell syntax and source modes
+      - name: Verify shell syntax with the platform sh
         run: |
-          sh -n md2pdf install.sh uninstall.sh install-skill.sh tests/run.sh tests/skill-installer.sh
-          sh -n tests/fixtures/bsd-stat tests/fixtures/mock-curl tests/fixtures/typst-proxy
-          test -x md2pdf
-          test -x install.sh
-          test -x uninstall.sh
-          test -x install-skill.sh
-          test -x tests/run.sh
-          test -x tests/skill-installer.sh
-          test ! -x tests/fixtures/bsd-stat
-          test ! -x tests/fixtures/mock-curl
-          test ! -x tests/fixtures/typst-proxy
+          for script in md2pdf install.sh uninstall.sh install-skill.sh tests/*.sh tests/fixtures/bsd-stat tests/fixtures/mock-curl tests/fixtures/typst-proxy; do
+            sh -n "$script"
+          done
 
       - name: Run real PDF suite
         run: ./tests/run.sh

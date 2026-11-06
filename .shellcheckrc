@@ -1,0 +1,3 @@
+# `CDPATH= cd` deliberately clears CDPATH for a single command; it is not a
+# mistyped assignment.
+disable=SC1007

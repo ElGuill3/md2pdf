@@ -18,9 +18,22 @@ Install the external development tools listed in
 
 ```sh
 ./tests/run.sh
-sh -n md2pdf install.sh uninstall.sh tests/run.sh
-git diff --check
+./tests/skill-installer.sh
+./tests/lint.sh
+./tests/docs.sh
 ```
+
+`tests/lint.sh` checks shell syntax, executable modes, [ShellCheck](https://www.shellcheck.net)
+findings, that workflow actions are pinned to full commit SHAs, and whitespace
+errors in tracked files. It requires ShellCheck and a
+Git checkout; set `SHELLCHECK` to use a different ShellCheck command. Silence a
+ShellCheck finding only for intentional code, with an inline directive that
+states the reason.
+
+`tests/docs.sh` checks that relative links and heading anchors in the README,
+`docs/`, and `skills/` resolve, that every option in `md2pdf --help` is
+documented in the README, and that every version surface matches the launcher
+`VERSION`. CI runs the same scripts on every pull request.
 
 The suite must remain usable outside a Git worktree. Installation tests must use
 temporary HOME, XDG, or prefix paths and must never write to the real user

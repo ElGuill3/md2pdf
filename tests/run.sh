@@ -665,6 +665,7 @@ for profile_pair in \
   'technical academic' \
   'report academic'
 do
+  # shellcheck disable=SC2086 # Split the pair into two profile names.
   set -- $profile_pair
   left_profile=$1
   right_profile=$2
@@ -733,6 +734,7 @@ run_status "complex typed YAML succeeds" 0 \
   "$CLI" "$SOURCE/complex.md" "$OUTPUT/complex.pdf"
 pdftotext "$OUTPUT/complex.pdf" "$TMP_ROOT/complex.txt"
 assert_contains "quoted title word survives" "Quoted" "$TMP_ROOT/complex.txt"
+# shellcheck disable=SC1003 # The expected text ends with a literal backslash.
 assert_contains "title backslash survives" 'with a \' "$TMP_ROOT/complex.txt"
 assert_contains "title backslash word survives" "backslash" "$TMP_ROOT/complex.txt"
 assert_contains "structured author name survives" "Ada Lovelace" "$TMP_ROOT/complex.txt"
@@ -924,6 +926,7 @@ else
   fail "failed conversion preserves existing target"
 fi
 
+# shellcheck disable=SC2016 # The inner sh expands its own arguments.
 run_status "new PDF honors caller umask" 0 \
   sh -c 'umask 027; exec "$1" "$2" "$3"' sh \
     "$CLI" "$SOURCE/simple.md" "$OUTPUT/umask.pdf"
@@ -937,6 +940,7 @@ fi
 
 printf 'existing target\n' > "$OUTPUT/preserved-mode.pdf"
 chmod 600 "$OUTPUT/preserved-mode.pdf"
+# shellcheck disable=SC2016 # The inner sh expands its own arguments.
 run_status "existing PDF mode is preserved across atomic replacement" 0 \
   sh -c 'umask 022; exec "$1" "$2" "$3"' sh \
     "$CLI" "$SOURCE/simple.md" "$OUTPUT/preserved-mode.pdf"
@@ -1494,6 +1498,7 @@ install_work=$TMP_ROOT/installed-conversion
 mkdir -p "$install_work/assets"
 cp "$SOURCE/local-svg.md" "$install_work/document.md"
 cp "$SOURCE/assets/mark.svg" "$install_work/assets/mark.svg"
+# shellcheck disable=SC2016 # The inner sh expands its own arguments.
 run_status "installed launcher converts from another working directory" 0 \
   env HOME="$install_home" XDG_BIN_HOME="$install_bin" XDG_DATA_HOME="$install_data" \
     sh -c 'cd "$1" && "$2" document.md result.pdf' sh \
@@ -1515,6 +1520,7 @@ else
 fi
 
 secure_prefix=$TMP_ROOT/secure-prefix
+# shellcheck disable=SC2016 # The inner sh expands its own arguments.
 run_status "hostile umask installation succeeds" 0 sh -c \
   'umask 000; exec "$1" --prefix "$2"' sh "$ROOT/install.sh" "$secure_prefix"
 bad_mode=
@@ -1620,6 +1626,93 @@ run_status "installer passes POSIX shell syntax" 0 sh -n "$ROOT/install.sh"
 run_status "uninstaller passes POSIX shell syntax" 0 sh -n "$ROOT/uninstall.sh"
 run_status "curl fixture passes POSIX shell syntax" 0 sh -n "$SOURCE/mock-curl"
 run_status "Typst proxy fixture passes POSIX shell syntax" 0 sh -n "$SOURCE/typst-proxy"
+
+DOCS_CHECK=$ROOT/tests/docs.sh
+docs_root=$TMP_ROOT/docs-root
+
+docs_fixture() {
+  rm -rf "$docs_root"
+  mkdir -p "$docs_root/share/md2pdf/filters"
+  for docs_file in md2pdf install.sh uninstall.sh README.md CONTRIBUTING.md \
+    CHANGELOG.md LICENSE; do
+    cp "$ROOT/$docs_file" "$docs_root/$docs_file"
+  done
+  cp -R "$ROOT/docs" "$ROOT/skills" "$docs_root/"
+  cp "$DATA/filters/runtime.lua" "$docs_root/share/md2pdf/filters/runtime.lua"
+}
+
+docs_fixture
+cat >> "$docs_root/README.md" <<'EOF'
+
+See [the site](https://example.invalid/missing) and `[code](nowhere.md)`.
+
+```text
+[fenced](nowhere.md)
+```
+
+## Tool `Boundary` & Rules (v2)
+
+Jump to [the rules](#tool-boundary--rules-v2).
+EOF
+run_status "documentation checks pass on current docs" 0 \
+  "$DOCS_CHECK" "$docs_root"
+docs_stdout=$last_stdout
+docs_stderr=$last_stderr
+assert_contains "documentation checks report every check" \
+  "3 checks passed; 0 checks failed; 3 total" "$docs_stdout"
+assert_empty "documentation checks pass without diagnostics" "$docs_stderr"
+
+docs_fixture
+printf 'See [gone](docs/missing.md).\n' >> "$docs_root/README.md"
+docs_line=$(wc -l < "$docs_root/README.md" | tr -d ' ')
+run_status "documentation checks reject a missing link target" 1 \
+  "$DOCS_CHECK" "$docs_root"
+docs_stdout=$last_stdout
+docs_stderr=$last_stderr
+assert_contains "missing link target is located" \
+  "  README.md:$docs_line: missing link target docs/missing.md" "$docs_stderr"
+assert_contains "missing link target fails the link check" \
+  "not ok - relative links and anchors resolve" "$docs_stderr"
+assert_contains "missing link target leaves other checks passing" \
+  "2 checks passed; 1 checks failed; 3 total" "$docs_stdout"
+
+docs_fixture
+printf 'See [limits](compatibility.md#no-such-heading).\n' \
+  >> "$docs_root/docs/configuration.md"
+docs_line=$(wc -l < "$docs_root/docs/configuration.md" | tr -d ' ')
+run_status "documentation checks reject a missing anchor" 1 \
+  "$DOCS_CHECK" "$docs_root"
+assert_contains "missing anchor is located relative to its document" \
+  "  docs/configuration.md:$docs_line: missing anchor compatibility.md#no-such-heading" \
+  "$last_stderr"
+
+docs_fixture
+# shellcheck disable=SC2016 # The backticks are literal Markdown.
+grep -v -F '`--profile NAME`' "$ROOT/README.md" > "$docs_root/README.md"
+run_status "documentation checks reject an undocumented help option" 1 \
+  "$DOCS_CHECK" "$docs_root"
+docs_stdout=$last_stdout
+docs_stderr=$last_stderr
+assert_contains "undocumented help option is named" \
+  "  README.md does not document: --profile" "$docs_stderr"
+assert_contains "undocumented help option fails the help check" \
+  "not ok - help options are documented in README.md" "$docs_stderr"
+
+docs_fixture
+sed 's/^VERSION=0\.3\.0$/VERSION=9.9.9/' "$ROOT/install.sh" > "$docs_root/install.sh"
+printf 'Upgrade from md2pdf 0.2.0.\n' >> "$docs_root/docs/compatibility.md"
+docs_line=$(wc -l < "$docs_root/docs/compatibility.md" | tr -d ' ')
+run_status "documentation checks reject disagreeing versions" 1 \
+  "$DOCS_CHECK" "$docs_root"
+docs_stdout=$last_stdout
+docs_stderr=$last_stderr
+assert_contains "version mismatch names the surface" \
+  "  install.sh does not contain VERSION=0.3.0" "$docs_stderr"
+assert_contains "stale version mention is located" \
+  "  stale version: docs/compatibility.md:$docs_line:Upgrade from md2pdf 0.2.0." \
+  "$docs_stderr"
+assert_contains "version mismatch fails the version check" \
+  "not ok - version surfaces agree with md2pdf 0.3.0" "$docs_stderr"
 
 non_git_root=$TMP_ROOT/non-git-copy
 mkdir -p "$non_git_root"
